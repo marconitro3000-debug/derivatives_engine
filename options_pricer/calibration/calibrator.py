@@ -180,7 +180,7 @@ def _calibrate_heston(md: MarketData, warm_start: dict | None) -> CalibrationRes
     ub = [1.0,  20.0, 1.0,  5.0,   0.0]   # rho<=0 typical for equity skew
 
     sol = least_squares(resid, seed, bounds=(lb, ub),
-                        method="trf", max_nfev=300)
+                        method="trf", max_nfev=120, ftol=1e-5, xtol=1e-5)
 
     p_fit = heston_mod.HestonParams.from_array(sol.x)
 

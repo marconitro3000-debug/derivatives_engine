@@ -35,6 +35,10 @@ env/
 Thumbs.db
 desktop.ini
 
+# Generated figures / demo output
+output/
+_test_output.png
+
 # Distribution
 *.tar.gz
 *.whl

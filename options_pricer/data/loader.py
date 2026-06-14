@@ -42,19 +42,41 @@ class YFinanceLoader(MarketDataLoader):
     def load(self, ticker: str,
              max_expiries: int = 6,
              moneyness_range: tuple = (0.85, 1.15),
-             min_volume: int = 10) -> MarketData:
+             min_volume: int = 10,
+             min_maturity: float = 0.04,
+             max_per_expiry: int = 20) -> MarketData:
+        """
+        min_maturity   : minimum T in years (default ~2 weeks). Filters 0DTE/weekly.
+        max_per_expiry : subsample to this many evenly-spaced strikes per expiry.
+                         Keeps calibration fast without sacrificing smile coverage.
+        """
         import yfinance as yf
 
         tk   = yf.Ticker(ticker)
         spot = tk.history(period="1d")["Close"].iloc[-1]
         spot = float(spot)
 
-        expiries = tk.options[:max_expiries]
-        if not expiries:
+        all_expiries = tk.options
+        if not all_expiries:
             raise RuntimeError(f"No option expiries available for {ticker}.")
 
-        strikes, maturities, ivs, weights = [], [], [], []
+        # filter to get at least min_maturity, then take first max_expiries
         now = datetime.now()
+        expiries = []
+        for exp in all_expiries:
+            T = (datetime.strptime(exp, "%Y-%m-%d") - now).days / 365.0
+            if T >= min_maturity:
+                expiries.append(exp)
+            if len(expiries) >= max_expiries:
+                break
+
+        if not expiries:
+            raise RuntimeError(
+                f"No expiries >= {min_maturity:.2f}Y for {ticker}. "
+                "Lower min_maturity or check the ticker."
+            )
+
+        strikes, maturities, ivs, weights = [], [], [], []
 
         for exp in expiries:
             T = (datetime.strptime(exp, "%Y-%m-%d") - now).days / 365.0
@@ -66,12 +88,15 @@ class YFinanceLoader(MarketDataLoader):
                 (chain["impliedVolatility"] > 0.01) &
                 (chain["strike"] >= spot * moneyness_range[0]) &
                 (chain["strike"] <= spot * moneyness_range[1])
-            ]
+            ].sort_values("strike").reset_index(drop=True)
+            # subsample evenly across the strike range (keeps smile shape)
+            if len(chain) > max_per_expiry:
+                idx = np.linspace(0, len(chain)-1, max_per_expiry, dtype=int)
+                chain = chain.iloc[idx]
             for _, row in chain.iterrows():
                 strikes.append(float(row["strike"]))
                 maturities.append(T)
                 ivs.append(float(row["impliedVolatility"]))
-                # weight by volume (liquidity-weighted calibration)
                 weights.append(np.sqrt(float(row["volume"]) + 1))
 
         if not strikes:

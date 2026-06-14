@@ -28,6 +28,31 @@ Built as part of a quantitative finance portfolio. See [demo.ipynb](demo.ipynb) 
 pip install -e ".[dev]"
 ```
 
+### Generate all figures (no Jupyter needed)
+
+```bash
+python run_demo.py              # SPY (default)
+python run_demo.py AAPL
+python run_demo.py NVDA --model svi
+python run_demo.py TSLA --max-expiries 4
+```
+
+Requires network access (free Yahoo Finance data, no API key). Figures are saved to `output/`.
+
+| Section | Content | Data source |
+|---------|---------|-------------|
+| **S1** Black-Scholes Greeks | Price & Greeks vs strike, real maturities | Real S, σ_ATM, r from yfinance |
+| **S2** IV Round-trip | Solver verified on all real market options | Real option chain |
+| **S3** Monte Carlo | GBM paths from real spot; MC vs BS vs market mid | Real S, σ_ATM, bid/ask |
+| **S4** CRR Binomial | Convergence for real near-ATM call & put | Real option params |
+| **S5** IV Surface | Smile per maturity, log-moneyness view | Real chain (yfinance) |
+| **S6** 3-D Vol Surface | Spline interpolation + contour map | Real chain |
+| **S7** Calibration | Heston or SVI fit vs market quotes | Real chain |
+| **S8** Realized Vol + VIX | 3-year SPY history, EWMA, variance risk premium | Real daily prices + VIX |
+
+**Model choice:** `--model heston` (default) fits one Heston model across all maturities (captures term structure, ~40s); `--model svi` fits one SVI slice per maturity (0.03s, lower RMSE, guaranteed butterfly-arbitrage-free).
+
+
 ```python
 from options_pricer import price, greeks, implied_vol, mc_price, binomial_price
 

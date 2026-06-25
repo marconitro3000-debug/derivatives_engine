@@ -7,6 +7,7 @@ Run with: pytest tests/test_calibration.py -v
 import warnings
 warnings.filterwarnings("ignore")
 
+import gc
 import numpy as np
 import pytest
 import tempfile, os, sys
@@ -24,8 +25,13 @@ from options_pricer.models import svi as svi_mod
 def tmp_db():
     path = tempfile.mktemp(suffix=".db")
     yield path
-    if os.path.exists(path):
-        os.unlink(path)
+    gc.collect()   # force-close any SQLite connections still held by garbage collector
+    for wal in (path, path + "-wal", path + "-shm"):
+        try:
+            if os.path.exists(wal):
+                os.unlink(wal)
+        except PermissionError:
+            pass   # Windows may still hold a brief lock; file will be cleaned by OS
 
 
 # ── Heston model ──────────────────────────────────────────────────────────────

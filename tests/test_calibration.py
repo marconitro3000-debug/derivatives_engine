@@ -13,25 +13,25 @@ import pytest
 import tempfile, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from options_pricer.engine import PricingEngine
-from options_pricer.calibration.store import CalibrationStore
-from options_pricer.calibration.calibrator import calibrate, blend_params
-from options_pricer.data.loader import SyntheticLoader
-from options_pricer.models import heston as h
-from options_pricer.models import svi as svi_mod
+from options.engine import PricingEngine
+from core.calibration.store import CalibrationStore
+from core.calibration.calibrator import calibrate, blend_params
+from core.data.loader import SyntheticLoader
+from core.models import heston as h
+from core.models import svi as svi_mod
 
 
 @pytest.fixture
 def tmp_db():
     path = tempfile.mktemp(suffix=".db")
     yield path
-    gc.collect()   # force-close any SQLite connections still held by garbage collector
+    gc.collect()
     for wal in (path, path + "-wal", path + "-shm"):
         try:
             if os.path.exists(wal):
                 os.unlink(wal)
         except PermissionError:
-            pass   # Windows may still hold a brief lock; file will be cleaned by OS
+            pass
 
 
 # ── Heston model ──────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ def tmp_db():
 class TestHestonModel:
 
     def test_reduces_to_bs_at_low_vol_of_vol(self):
-        from options_pricer.core.black_scholes import price as bs
+        from options.black_scholes import price as bs
         p  = h.HestonParams(v0=0.04, kappa=2.0, theta=0.04, xi=0.001, rho=0.0)
         hp = h.price(100, 100, 1.0, 0.05, p, "call")
         bp = bs(100, 100, 1.0, 0.05, 0.2, "call")
@@ -91,7 +91,7 @@ class TestCalibrationRecovery:
         loader = SyntheticLoader()
         md = loader.load(noise=0.0)
         result = calibrate("heston", md)
-        assert result.rmse < 0.01   # under 1% IV error
+        assert result.rmse < 0.01
 
     def test_svi_low_rmse(self):
         loader = SyntheticLoader()

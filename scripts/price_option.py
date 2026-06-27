@@ -1,5 +1,5 @@
 """
-price_option.py  --  Price a single option from live market data.
+scripts/price_option.py  --  Price a single option from live market data.
 
 Spot price and ATM implied vol are fetched live from Yahoo Finance.
 Heston and SVI are calibrated to the real option chain before pricing.
@@ -7,11 +7,11 @@ Results and plots are saved to output/<TICKER_YYYYMMDD_HHMMSS>/.
 
 Usage
 -----
-    python price_option.py AAPL --strike 185 --expiry 0.25
-    python price_option.py SPY  --strike 500 --expiry 0.5  --model heston
-    python price_option.py TSLA --strike 250 --expiry 1.0  --type put --model all
-    python price_option.py NVDA --strike 900 --expiry 0.25 --model black-scholes
-    python price_option.py GS   --strike 520 --expiry 0.75 --model svi --type call
+    python scripts/price_option.py AAPL --strike 185 --expiry 0.25
+    python scripts/price_option.py SPY  --strike 500 --expiry 0.5  --model heston
+    python scripts/price_option.py TSLA --strike 250 --expiry 1.0  --type put --model all
+    python scripts/price_option.py NVDA --strike 900 --expiry 0.25 --model black-scholes
+    python scripts/price_option.py GS   --strike 520 --expiry 0.75 --model svi --type call
 """
 
 import argparse
@@ -20,6 +20,9 @@ import os
 import sys
 from datetime import datetime
 
+# allow running from any directory
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import yfinance as yf
 import matplotlib
@@ -27,10 +30,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 
-from options_pricer import price, greeks, mc_price, binomial_price
-from options_pricer.core.implied_vol import implied_vol as bs_iv
-from options_pricer.calibration.calibrator import calibrate
-from options_pricer.data.loader import YFinanceLoader
+from options import price, greeks, mc_price, binomial_price
+from options.implied_vol import implied_vol as bs_iv
+from core.calibration.calibrator import calibrate
+from core.data.loader import YFinanceLoader
 
 
 # -- CLI -----------------------------------------------------------------------
@@ -76,7 +79,8 @@ MODEL  = args.model
 # -- Run code + output directory -----------------------------------------------
 
 RUN_CODE = f"{TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", RUN_CODE)
+OUT_DIR  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "output", RUN_CODE)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 
@@ -174,8 +178,8 @@ print()
 
 # -- Storage for plot data ----------------------------------------------------
 
-_results = {}   # label -> price (for comparison bar chart)
-_plot    = {}   # plot-specific data per model
+_results = {}
+_plot    = {}
 
 
 # -- Fetch market smile data for smile plot -----------------------------------
@@ -238,7 +242,6 @@ def run_monte_carlo():
     print(f"  Std error:         ${res['std_error']:.4f}")
     print(f"  95% CI:            [${res['conf_95_lo']:.4f}, ${res['conf_95_hi']:.4f}]")
     _results['Monte Carlo'] = res['price']
-    # generate sample paths for the plot
     n_show  = 60
     n_steps = max(int(T * 252), 10)
     dt_s    = T / n_steps
@@ -252,8 +255,8 @@ def run_monte_carlo():
 def run_heston():
     print("-- Heston (calibrating to live option chain...) ------------------ (European)")
     try:
-        from options_pricer.models.heston import HestonParams
-        from options_pricer.models.heston import price as h_price
+        from core.models.heston import HestonParams
+        from core.models.heston import price as h_price
 
         loader = YFinanceLoader(risk_free_rate=r)
         md     = loader.load(TICKER, max_expiries=args.expiries)
@@ -277,7 +280,6 @@ def run_heston():
         print(f"  Price:             ${px:.4f}")
         _results['Heston'] = px
 
-        # pre-compute smile for plot (nearest maturity to T)
         T_avail = np.unique(md.maturities)
         near_T  = T_avail[np.argmin(np.abs(T_avail - T))]
         mask    = md.maturities == near_T
@@ -302,7 +304,7 @@ def run_heston():
 def run_svi():
     print("-- SVI (calibrating to live option chain...) -------------------- (European)")
     try:
-        from options_pricer.models.svi import SVIParams, implied_vol_svi
+        from core.models.svi import SVIParams, implied_vol_svi
 
         loader = YFinanceLoader(risk_free_rate=r)
         md     = loader.load(TICKER, max_expiries=args.expiries)
@@ -342,7 +344,6 @@ def run_svi():
         print(f"  Price:             ${px_svi:.4f}")
         _results['SVI'] = px_svi
 
-        # pre-compute smile for plot (nearest slice)
         mask   = md.maturities == near_T
         K_mkt  = md.strikes[mask]
         iv_mkt = md.ivs[mask]

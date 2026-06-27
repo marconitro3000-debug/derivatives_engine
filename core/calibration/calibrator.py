@@ -18,8 +18,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from scipy.optimize import least_squares
 
-from ..models import svi as svi_mod
-from ..models import heston as heston_mod
+from core.models import svi as svi_mod
+from core.models import heston as heston_mod
 
 
 # ── result container ──────────────────────────────────────────────────────────
@@ -97,7 +97,6 @@ def _calibrate_svi(md: MarketData, warm_start: dict | None) -> CalibrationResult
         F    = md.spot * np.exp(md.r * T)
         k    = np.log(K_s / F)
 
-        # seed: warm slice if available, else default
         T_key = f"{T:.6f}"
         if T_key in warm_slices:
             seed = svi_mod.SVIParams.from_dict(warm_slices[T_key]).as_array()
@@ -129,7 +128,6 @@ def _calibrate_svi(md: MarketData, warm_start: dict | None) -> CalibrationResult
     all_mkt_iv   = np.array(all_mkt_iv)
     errors = np.abs(all_model_iv - all_mkt_iv)
 
-    # arb check across all slices
     arb_free = all(
         svi_mod.is_butterfly_arbitrage_free(svi_mod.SVIParams.from_dict(s))
         for s in slices.values()
@@ -160,8 +158,7 @@ def _calibrate_heston(md: MarketData, warm_start: dict | None) -> CalibrationRes
         seed = heston_mod.default_params(atm_var).as_array()
         warm = False
 
-    # precompute market prices from market IVs for objective in price space
-    from ..core.black_scholes import price as bs_price
+    from options.black_scholes import price as bs_price
     mkt_prices = np.array([
         bs_price(md.spot, K, T, md.r, iv, "call")
         for K, T, iv in zip(md.strikes, md.maturities, md.ivs)
@@ -175,17 +172,15 @@ def _calibrate_heston(md: MarketData, warm_start: dict | None) -> CalibrationRes
         ])
         return md.weights * (model_prices - mkt_prices)
 
-    # bounds: v0>0, kappa>0, theta>0, xi>0, -1<rho<1
     lb = [1e-4, 0.1,  1e-4, 1e-2, -0.999]
-    ub = [1.0,  20.0, 1.0,  5.0,   0.0]   # rho<=0 typical for equity skew
+    ub = [1.0,  20.0, 1.0,  5.0,   0.0]
 
     sol = least_squares(resid, seed, bounds=(lb, ub),
                         method="trf", max_nfev=120, ftol=1e-5, xtol=1e-5)
 
     p_fit = heston_mod.HestonParams.from_array(sol.x)
 
-    # report error in IV space for comparability
-    from ..core.implied_vol import implied_vol
+    from options.implied_vol import implied_vol
     iv_model = []
     for K, T in zip(md.strikes, md.maturities):
         try:

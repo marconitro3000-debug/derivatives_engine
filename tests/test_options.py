@@ -1,5 +1,5 @@
 """
-tests/test_pricer.py
+tests/test_options.py
 Full test suite for the options pricer.
 Run with: pytest tests/ -v
 """
@@ -9,7 +9,7 @@ import pytest
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from options_pricer import (
+from options import (
     price, greeks, put_call_parity_check,
     implied_vol, iv_surface,
     mc_price,
@@ -131,7 +131,7 @@ class TestMonteCarlo:
         res = mc_price(**params, option_type="european_call",
                        n_sims=80_000, seed=0)
         bs  = price(**params, option="call")
-        assert abs(res["price"] - bs) / bs < 0.02   # within 2%
+        assert abs(res["price"] - bs) / bs < 0.02
 
     def test_european_put_close_to_bs(self, params):
         res = mc_price(**params, option_type="european_put",
@@ -146,18 +146,16 @@ class TestMonteCarlo:
         assert res["conf_95_lo"] < bs < res["conf_95_hi"]
 
     def test_antithetic_reduces_std_error(self, params):
-        """Antithetic variates should reduce std_error on average — test with large N."""
         plain = mc_price(**params, option_type="european_call",
                          n_sims=100_000, antithetic=False, seed=42)
         anti  = mc_price(**params, option_type="european_call",
                          n_sims=100_000, antithetic=True, seed=42)
-        # With enough paths antithetic is reliably better; allow small tolerance
         assert anti["std_error"] < plain["std_error"] * 1.05
 
     def test_asian_call_cheaper_than_euro(self, params):
         asian = mc_price(**params, option_type="asian_call",  n_sims=50_000, seed=2)
         euro  = mc_price(**params, option_type="european_call", n_sims=50_000, seed=2)
-        assert asian["price"] <= euro["price"]   # Asian ≤ European by theory
+        assert asian["price"] <= euro["price"]
 
     def test_barrier_call_cheaper_than_euro(self, params):
         barrier = mc_price(**params, option_type="barrier_call",
@@ -168,7 +166,7 @@ class TestMonteCarlo:
 
     def test_digital_call_price_in_range(self, params):
         res = mc_price(**params, option_type="digital_call", n_sims=100_000, seed=5)
-        assert 0 < res["price"] < 1   # payo $1 if S_T > K
+        assert 0 < res["price"] < 1
 
     def test_unknown_payoff_raises(self, params):
         with pytest.raises(ValueError):
@@ -182,7 +180,7 @@ class TestBinomialTree:
     def test_european_call_converges_to_bs(self, params):
         res = binomial_price(**params, option="call", style="european", n_steps=1000)
         bs  = price(**params, option="call")
-        assert abs(res["price"] - bs) / bs < 0.001   # within 0.1%
+        assert abs(res["price"] - bs) / bs < 0.001
 
     def test_european_put_converges_to_bs(self, params):
         res = binomial_price(**params, option="put", style="european", n_steps=1000)
@@ -192,12 +190,12 @@ class TestBinomialTree:
     def test_american_put_ge_european_put(self, params):
         am = binomial_price(**params, option="put", style="american", n_steps=500)
         eu = binomial_price(**params, option="put", style="european", n_steps=500)
-        assert am["price"] >= eu["price"]   # early exercise has value
+        assert am["price"] >= eu["price"]
 
     def test_american_call_no_early_exercise(self, params):
         """For non-dividend-paying stock, American call = European call."""
         am = binomial_price(**params, option="call", style="american", n_steps=500)
-        assert am["early_exercise"] < 0.01   # negligible premium
+        assert am["early_exercise"] < 0.01
 
     def test_deep_itm_american_put_premium(self):
         """Deep ITM put should have significant early exercise premium."""

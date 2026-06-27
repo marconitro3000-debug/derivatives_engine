@@ -1,5 +1,5 @@
 """
-core/black_scholes.py
+options/black_scholes.py
 Analytical Black-Scholes pricing and Greeks for European options.
 """
 

@@ -99,27 +99,9 @@ def price(S: float, K: float, T: float, r: float,
     if option == "call":
         return float(max(call, 0.0))
     elif option == "put":
-        # put-call parity
         return float(max(call - S + K * np.exp(-r * T), 0.0))
     else:
         raise ValueError("option must be 'call' or 'put'.")
-
-
-# ── implied vol of a Heston price (for surface comparison) ─────────────────────
-
-def implied_vol_surface(S: float, strikes, maturities, r: float,
-                        p: HestonParams) -> dict:
-    """Generate the BS-implied-vol surface implied by a Heston parameter set."""
-    from ..core.implied_vol import implied_vol
-    surf = {}
-    for K in strikes:
-        for T in maturities:
-            try:
-                px = price(S, K, T, r, p, "call")
-                surf[(K, T)] = implied_vol(S, K, T, r, px, "call")
-            except (ValueError, ZeroDivisionError):
-                surf[(K, T)] = None
-    return surf
 
 
 # ── default seed ──────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 """
-engine.py
+options/engine.py
 High-level self-updating pricing engine.
 
-This is the main user-facing entry point. It ties together:
+This is the main user-facing entry point for options. It ties together:
   - data loaders (yfinance / synthetic)
   - calibration (SVI / Heston) with warm start + EWMA smoothing
   - SQLite persistence (versioned history)
@@ -10,7 +10,7 @@ This is the main user-facing entry point. It ties together:
 
 Typical usage
 -------------
-    from options_pricer.engine import PricingEngine
+    from options.engine import PricingEngine
 
     eng = PricingEngine(model="heston", db_path="my_cals.db")
 
@@ -29,12 +29,12 @@ Typical usage
 
 import numpy as np
 
-from .calibration.calibrator import calibrate, MarketData, CalibrationResult
-from .calibration.store import CalibrationStore
-from .data.loader import YFinanceLoader, SyntheticLoader
-from .models import heston as heston_mod
-from .models import svi as svi_mod
-from .core.black_scholes import price as bs_price
+from core.calibration.calibrator import calibrate, MarketData, CalibrationResult
+from core.calibration.store import CalibrationStore
+from core.data.loader import YFinanceLoader, SyntheticLoader
+from core.models import heston as heston_mod
+from core.models import svi as svi_mod
+from .black_scholes import price as bs_price
 
 
 class PricingEngine:
@@ -49,7 +49,7 @@ class PricingEngine:
         self.model = model
         self.r     = risk_free_rate
         self.store = CalibrationStore(db_path)
-        self._last_spot = {}   # ticker -> spot from last update
+        self._last_spot = {}
 
         if source == "yfinance":
             self.loader = YFinanceLoader(risk_free_rate)
@@ -106,7 +106,6 @@ class PricingEngine:
         if spot is None:
             spot = self._last_spot.get(ticker)
             if spot is None:
-                # pull spot from the most recent stored row
                 hist = self.store.history(ticker, self.model, limit=1)
                 spot = hist[0]["spot"] if hist and hist[0]["spot"] else None
             if spot is None:
@@ -123,7 +122,7 @@ class PricingEngine:
         if self.model == "svi":
             return self._svi_iv(params, K, T, spot)
         else:
-            from .core.implied_vol import implied_vol as bs_iv
+            from .implied_vol import implied_vol as bs_iv
             p  = heston_mod.HestonParams.from_dict(params)
             px = heston_mod.price(spot, K, T, self.r, p, "call")
             return float(bs_iv(spot, K, T, self.r, px, "call"))
@@ -142,7 +141,6 @@ class PricingEngine:
             p = svi_mod.SVIParams.from_dict(slices[f"{T_slice:.6f}"])
             return float(svi_mod.total_variance(np.array([k]), p)[0])
 
-        # exact or nearest-bracket interpolation in total variance
         if T <= avail_T[0]:
             w = slice_total_var(avail_T[0]) * (T / avail_T[0])
         elif T >= avail_T[-1]:
@@ -155,7 +153,7 @@ class PricingEngine:
             else:
                 w_lo, w_hi = slice_total_var(lo), slice_total_var(hi)
                 frac = (T - lo) / (hi - lo)
-                w = w_lo + frac * (w_hi - w_lo)   # linear in total variance
+                w = w_lo + frac * (w_hi - w_lo)
 
         return float(np.sqrt(max(w, 1e-12) / T))
 

@@ -1,5 +1,5 @@
 """
-core/monte_carlo.py
+options/monte_carlo.py
 Monte Carlo pricing under GBM with variance-reduction techniques.
 
 Supported payoffs
@@ -102,9 +102,9 @@ def _simulate_gbm(S: float, T: float, r: float, sigma: float,
     Z    = rng.standard_normal((half, n_steps))
 
     if antithetic:
-        Z = np.concatenate([Z, -Z], axis=0)   # shape (n_sims, n_steps)
+        Z = np.concatenate([Z, -Z], axis=0)
 
-    log_returns = drift + vol * Z              # (n_sims, n_steps)
+    log_returns = drift + vol * Z
     log_paths   = np.cumsum(log_returns, axis=1)
     paths       = S * np.exp(np.hstack([np.zeros((len(Z), 1)), log_paths]))
     return paths

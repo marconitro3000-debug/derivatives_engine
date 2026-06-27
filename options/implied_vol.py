@@ -1,5 +1,5 @@
 """
-core/implied_vol.py
+options/implied_vol.py
 Implied volatility extraction via Newton-Raphson (primary) with Brent fallback.
 """
 
@@ -74,7 +74,6 @@ def implied_vol(S: float, K: float, T: float, r: float,
     ------
     ValueError if no solution exists in [_SIGMA_LO, _SIGMA_HI].
     """
-    # intrinsic value bounds
     disc = np.exp(-r * T)
     if option == "call":
         lower_bound = max(S - K * disc, 0.0)
@@ -87,12 +86,10 @@ def implied_vol(S: float, K: float, T: float, r: float,
             f"{lower_bound:.4f} — arbitrage-free IV does not exist."
         )
 
-    # try Newton-Raphson
     sigma = _newton(S, K, T, r, market_price, option)
     if sigma is not None:
         return float(sigma)
 
-    # fallback: Brent (guaranteed convergence on a bracket)
     f = lambda sig: price(S, K, T, r, sig, option) - market_price
     try:
         return float(brentq(f, _SIGMA_LO, _SIGMA_HI, xtol=_TOL_PRICE, maxiter=500))

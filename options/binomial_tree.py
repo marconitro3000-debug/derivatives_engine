@@ -1,5 +1,5 @@
 """
-core/binomial_tree.py
+options/binomial_tree.py
 Cox-Ross-Rubinstein (CRR) binomial tree.
 
 Supports European and American options (call and put).
@@ -40,7 +40,7 @@ def _crr_params(T: float, r: float, sigma: float,
 def _terminal_payoffs(S: float, K: float, u: float, d: float,
                       n_steps: int, option: str) -> np.ndarray:
     """Compute intrinsic payoffs at all terminal nodes."""
-    j      = np.arange(n_steps + 1)           # 0 = all-down, n_steps = all-up
+    j      = np.arange(n_steps + 1)
     S_T    = S * (u ** j) * (d ** (n_steps - j))
     if option == "call":
         return np.maximum(S_T - K, 0)
@@ -64,11 +64,9 @@ def _backward(S: float, K: float, T: float, r: float,
     values  = _terminal_payoffs(S, K, u, d, n_steps, option)
 
     for step in range(n_steps - 1, -1, -1):
-        # continuation value (one step earlier)
         values = disc * (p * values[1:] + q * values[:-1])
 
         if american:
-            # intrinsic at each node at this step
             j        = np.arange(step + 1)
             S_nodes  = S * (u ** j) * (d ** (step - j))
             if option == "call":
@@ -117,7 +115,6 @@ def binomial_price(S: float, K: float, T: float, r: float, sigma: float,
     american    = style == "american"
     price_val   = _backward(S, K, T, r, u, d, p, dt, n_steps, option, american)
 
-    # early-exercise premium (only meaningful for American)
     if american:
         euro_val = _backward(S, K, T, r, u, d, p, dt, n_steps, option, False)
         premium  = price_val - euro_val

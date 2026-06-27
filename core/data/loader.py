@@ -6,14 +6,14 @@ Two sources behind one abstract interface:
   - YFinanceLoader : real option chains from Yahoo Finance (needs network)
   - SyntheticLoader : Heston-generated chains for testing / demos / offline use
 
-Both return a calibration.MarketData object.
+Both return a core.calibration.MarketData object.
 """
 
 import numpy as np
 from datetime import datetime
 
-from ..calibration.calibrator import MarketData
-from ..models import heston as heston_mod
+from core.calibration.calibrator import MarketData
+from core.models import heston as heston_mod
 
 
 # ── base interface ────────────────────────────────────────────────────────────
@@ -60,7 +60,6 @@ class YFinanceLoader(MarketDataLoader):
         if not all_expiries:
             raise RuntimeError(f"No option expiries available for {ticker}.")
 
-        # filter to get at least min_maturity, then take first max_expiries
         now = datetime.now()
         expiries = []
         for exp in all_expiries:
@@ -89,7 +88,6 @@ class YFinanceLoader(MarketDataLoader):
                 (chain["strike"] >= spot * moneyness_range[0]) &
                 (chain["strike"] <= spot * moneyness_range[1])
             ].sort_values("strike").reset_index(drop=True)
-            # subsample evenly across the strike range (keeps smile shape)
             if len(chain) > max_per_expiry:
                 idx = np.linspace(0, len(chain)-1, max_per_expiry, dtype=int)
                 chain = chain.iloc[idx]
@@ -144,7 +142,7 @@ class SyntheticLoader(MarketDataLoader):
         if maturities is None:
             maturities = np.array([0.08, 0.25, 0.5, 1.0])
 
-        from ..core.implied_vol import implied_vol
+        from options.implied_vol import implied_vol
 
         K_list, T_list, iv_list = [], [], []
         for T in maturities:
@@ -166,5 +164,5 @@ class SyntheticLoader(MarketDataLoader):
             maturities=np.array(T_list),
             ivs=np.array(iv_list),
         )
-        md.true_params = true_params.to_dict()   # attach ground truth for tests
+        md.true_params = true_params.to_dict()
         return md

@@ -1,5 +1,5 @@
 """
-surface/vol_surface.py
+options/vol_surface.py
 Volatility surface construction and interpolation.
 
 Takes a sparse grid of (K, T) -> IV observations and returns a smooth surface
@@ -42,7 +42,6 @@ class VolSurface:
         nan_mask = np.isnan(grid)
         if not nan_mask.any():
             return grid
-        # fill each NaN with column mean, then any remaining with row mean
         col_means = np.nanmean(grid, axis=0)
         for j, cm in enumerate(col_means):
             mask = nan_mask[:, j]
@@ -58,7 +57,6 @@ class VolSurface:
                 self.strikes, self.maturities, grid, kx=kx, ky=ky
             )
         elif self.method == "rbf":
-            # flatten to (N, 2) points + values
             KK, TT = np.meshgrid(self.strikes, self.maturities, indexing="ij")
             pts    = np.column_stack([KK.ravel(), TT.ravel()])
             vals   = grid.ravel()
@@ -85,13 +83,12 @@ class VolSurface:
         T = np.atleast_1d(np.asarray(T, dtype=float))
 
         if self.method == "spline":
-            # RectBivariateSpline.ev handles arbitrary points
             result = self._interp.ev(K, T)
         else:
             pts    = np.column_stack([K.ravel(), T.ravel()])
             result = self._interp(pts)
 
-        return np.clip(result, 1e-6, None)   # IV must be positive
+        return np.clip(result, 1e-6, None)
 
     def term_structure(self, K: float) -> tuple[np.ndarray, np.ndarray]:
         """IV vs maturity at a fixed strike."""

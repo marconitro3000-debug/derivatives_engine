@@ -3,78 +3,66 @@
 ## Pricing
 
 ```bash
-python price_option.py TICKER --strike K --expiry T --model MODEL --type call|put
+python scripts/price_option.py TICKER --strike K --expiry T --model MODEL --type call|put
 ```
 
-`--expiry` en años. Ejemplos: `0.083` = 1 mes, `0.25` = 3 meses, `0.5` = 6 meses, `1.0` = 1 año.
+`--expiry` is in years. Examples: `0.083` = 1 month, `0.25` = 3 months,
+`0.5` = 6 months, `1.0` = 1 year.
 
-`--model` puede ser: `all` (default), `black-scholes`, `heston`, `svi`, `monte-carlo`, `binomial`.
+`--model` can be: `all` (default), `black-scholes`, `heston`, `svi`,
+`monte-carlo`, `binomial`.
 
-Por defecto coge el spot y la IV ATM en vivo de Yahoo Finance. Se pueden forzar con `--spot` y `--vol`.
+By default the CLI fetches spot and ATM IV from Yahoo Finance. Override them
+with `--spot` and `--vol`.
 
----
+## Examples
 
-### Ejemplos
-
-Precio de una call de AAPL con todos los modelos:
 ```bash
-python price_option.py AAPL --strike 185 --expiry 0.25
+python scripts/price_option.py AAPL --strike 185 --expiry 0.25
+python scripts/price_option.py SPY --strike 550 --expiry 0.5 --model heston
+python scripts/price_option.py TSLA --strike 250 --expiry 1.0 --model svi
+python scripts/price_option.py NVDA --strike 900 --expiry 0.25 --model black-scholes
+python scripts/price_option.py GS --strike 520 --expiry 0.75 --model monte-carlo
+python scripts/price_option.py MSFT --strike 420 --expiry 0.5 --model binomial
+python scripts/price_option.py AAPL --strike 185 --expiry 0.25 --type put --model heston
+python scripts/price_option.py SPY --strike 550 --expiry 0.5 --vol 0.18
+python scripts/price_option.py SPY --strike 550 --expiry 0.5 --spot 540 --vol 0.20
+python scripts/price_option.py TSLA --strike 250 --expiry 1.0 --type put --style american
 ```
 
-Solo Heston (calibra a la chain real de SPY antes de pricear, tarda ~40-60s):
+Option output path:
+
+```text
+output/<TICKER>/options/<run_id>/
+```
+
+## Rates
+
 ```bash
-python price_option.py SPY --strike 550 --expiry 0.5 --model heston
+python scripts/analyze_rates.py
+python scripts/analyze_rates.py --name usd_demo --deposit 0.25:0.052 --deposit 1:0.050 --swap 5:0.046
 ```
 
-SVI (calibra por maturity slice, tarda ~1s):
-```bash
-python price_option.py TSLA --strike 250 --expiry 1.0 --model svi
-```
+Rates output path:
 
-Black-Scholes analítico con la IV del mercado:
-```bash
-python price_option.py NVDA --strike 900 --expiry 0.25 --model black-scholes
+```text
+output/rates/<curve_name>/<run_id>/
 ```
-
-Monte Carlo (100k paths GBM):
-```bash
-python price_option.py GS --strike 520 --expiry 0.75 --model monte-carlo
-```
-
-Binomial CRR 500 pasos, europeo y americano:
-```bash
-python price_option.py MSFT --strike 420 --expiry 0.5 --model binomial
-```
-
-Put en vez de call:
-```bash
-python price_option.py AAPL --strike 185 --expiry 0.25 --type put --model heston
-```
-
-Forzar vol del 18% en vez de coger la del mercado:
-```bash
-python price_option.py SPY --strike 550 --expiry 0.5 --vol 0.18
-```
-
-Forzar spot y vol manualmente (sin red):
-```bash
-python price_option.py SPY --strike 550 --expiry 0.5 --spot 540 --vol 0.20
-```
-
----
 
 ## Tests
 
 ```bash
-pytest                            # los 61 tests
-pytest tests/test_pricer.py       # BS, IV, MC, binomial, vol surface
-pytest tests/test_calibration.py  # calibracion y engine
-pytest -k "heston"                # filtrar por nombre
+pytest
+pytest tests/test_options.py
+pytest tests/test_calibration.py
+pytest tests/test_forwards_futures.py
+pytest tests/test_rates.py
+pytest -k "heston"
 ```
 
 ## Install
 
 ```bash
-pip install -e ".[dev]"   # instalacion editable con pytest
-pip install -e .           # solo runtime
+pip install -e ".[dev]"
+pip install -e .
 ```

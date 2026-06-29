@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "options-pricer"
+name = "derivatives-engine"
 version = "1.0.0"
 description = "Derivatives pricing & volatility calibration engine"
 readme = "README.md"
@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [
     {name = "Marco"}
 ]
-keywords = ["quantitative finance", "options pricing", "volatility", "heston", "black-scholes"]
+keywords = ["quantitative finance", "derivatives pricing", "options", "forwards", "futures", "volatility", "heston", "black-scholes"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -34,7 +34,17 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["options_pricer*"]
+include = [
+    "core*",
+    "options*",
+    "forwards*",
+    "futures*",
+    "rates*",
+    "credit*",
+    "volatility*",
+    "exotics*",
+    "structured*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -3,113 +3,155 @@
 A neural network that fits the implied-volatility surface of a live equity option
 chain **and cannot price arbitrage into it**.
 
-Fitting a vol surface is a trade-off, and every practitioner runs into it:
+Fitting a vol surface is a trade-off every practitioner runs into:
 
 - Calibrate **SVI** to each expiry independently and you track the smiles
   beautifully — but nothing connects the slices, so interpolating between them
   produces calendar-spread arbitrage.
-- Calibrate a joint **SSVI** surface and calendar arbitrage is impossible by
+- Calibrate a joint **SSVI** surface and calendar arbitrage becomes impossible by
   construction — but three global shape parameters cannot follow a chain whose
   smile changes character between the front week and the one-year point.
 
 This project closes that gap. A network learns a bounded correction to an SSVI
-prior, trained under soft no-arbitrage penalties enforced on collocation points
-that deliberately extend *beyond* the quoted strikes. It fits like the flexible
-model and behaves like the safe one.
+prior, trained under no-arbitrage penalties enforced on collocation points that
+deliberately extend *beyond* the quoted strikes. It fits like the flexible model
+and behaves like the safe one.
 
-## Result on a live SPY chain
+```bash
+pip install -e .
+python main.py          # or just press Run
+```
 
-1,401 quotes across 8 expiries from 13 days to 1.8 years, 29 August 2026.
+No server, no flags, no arguments. Settings live in [`config.py`](config.py);
+output lands in `results/`.
+
+---
+
+## Result
+
+Live SPY chain, 1,400 quotes across 8 expiries from 13 days to 1.8 years.
 Every surface is scored by identical code:
 
 ```
 surface                              IV RMSE   max err   px RMSE  in spread  cal viol  bfly viol
 ------------------------------------------------------------------------------------------------
-Neural (SSVI prior + penalties)        32.4bp    737.1bp    0.3358      15.8%     0.00%      0.01%
-SVI (per-slice)                        48.1bp    544.0bp    0.5745       5.7%     0.27%      0.05%
-SSVI (joint)                          122.7bp   1549.1bp    1.3299       2.4%     0.00%      0.00%
+Neural (SSVI prior + penalties)        31.7bp    598.6bp    0.3587       8.9%     0.00%      0.00%
+SVI (per-slice)                        49.3bp    558.4bp    0.5783       5.6%     0.81%      0.05%
+SSVI (joint)                          115.8bp   1414.8bp    1.0710       2.1%     0.00%      0.00%
 ```
 
-The neural surface fits **1.5x closer than per-slice SVI and 3.8x closer than
-SSVI**, while being effectively free of static arbitrage — the residual 0.01% is
-a single grid point at the far edge of the extrapolation region, not a hole in
-the fitted surface.
+The neural surface fits **1.6× closer than per-slice SVI and 3.7× closer than
+SSVI** in vol space, is the best of the three in price space, and is the only one
+of the two arbitrage-free surfaces that fits. Full run in
+[`docs/example_report.txt`](docs/example_report.txt).
 
 ![smiles](docs/figures/smiles.png)
 
-The shaded bands are where no options trade. That is the region a surface has to
-invent, and where an unconstrained model quietly produces negative densities.
+Shaded bands are where no options trade — the region a surface has to invent.
 
 ![arbitrage map](docs/figures/arbitrage_neural.png)
 
-Durrleman's `g` and `dw/dT` across the whole plane. Red would be arbitrage;
-compare against `docs/figures/arbitrage_svi.png`, where the naive per-slice
-construction breaks down between listed expiries.
+Durrleman's `g` and `dw/dT` across the whole plane; red would be arbitrage.
+Compare [`arbitrage_svi.png`](docs/figures/arbitrage_svi.png), where the naive
+per-slice construction breaks down between listed expiries.
 
-On a *synthetic* chain generated from a smooth SSVI ground truth, per-slice SVI
-edges the network out on RMSE (20.8bp vs 24.3bp) and violates nothing. That is
-the expected result and worth stating: the network earns its keep on real
-quotes, where the smile is noisy and irregular, not on data that a parametric
-model already describes exactly.
+---
 
 ## How it works
 
-### 1. The chain is cleaned properly (`marketdata/chain.py`)
+### 1. The chain is cleaned properly — [`volsurface/chain.py`](volsurface/chain.py)
 
 Surface quality is decided here, not in the model.
 
-- **The forward and discount factor are implied from the market**, not assumed.
-  Put-call parity gives `C(K) - P(K) = DF * (F - K)`, a straight line in `K`; a
-  weighted regression over the liquid matched strikes returns both `DF` and the
-  forward the market is actually trading. This is what removes the systematic
-  skew tilt that a wrong dividend assumption produces.
-- **Out-of-the-money quotes only** — calls above the forward, puts below. The
-  ITM wing carries the same information with a wider spread.
-- **Implied vols are computed in-house**, from `mid / DF` in the forward
-  measure, so they are consistent with the fitted forward rather than with the
-  data vendor's own rate and dividend assumptions.
-- **Every quote carries a fitting weight of roughly vega / spread.** Unweighted
-  least squares in vol space chases deep wing options whose volatility is barely
-  identified by their price.
+**The forward and discount factor are implied from the market, not assumed.**
+Put-call parity gives `C(K) − P(K) = DF·(F − K)`, a straight line in `K`; a
+weighted regression over the liquid matched strikes returns both `DF` and the
+forward the market is actually trading. This removes the systematic skew tilt a
+wrong dividend assumption produces.
 
-### 2. The model is a bounded correction, not a free-form fit (`nn/model.py`)
+**Out-of-the-money quotes only** — calls above the forward, puts below. The ITM
+wing carries the same information with a wider spread.
+
+**Implied vols are computed in-house**, from `mid/DF` in the forward measure,
+consistent with the fitted forward rather than with a vendor's rate and dividend
+assumptions.
+
+**Quotes are weighted by vega / spread.** Unweighted least squares in vol space
+chases deep wing options whose volatility is barely identified by their price.
+
+### 2. The American problem — [`volsurface/american.py`](volsurface/american.py)
+
+SPY options are **American**. A European inversion has nowhere to put the
+early-exercise premium and charges it to volatility. Measured on the chain above:
 
 ```
-w(k, T) = w_SSVI(k, T) * [ 1 + alpha * tanh( net(k, T) ) ]
+removed 13.27bp of vol on average (median 0.99, p95 67.85, max 262.53)
+  calls   0.27bp mean   puts  20.16bp mean
+  T in [0.00, 0.15)  n= 321  mean   0.41bp  p95   2.38bp
+  T in [0.15, 0.50)  n= 341  mean   7.43bp  p95  26.88bp
+  T in [0.50, 1.00)  n= 164  mean  10.98bp  p95  50.63bp
+  T >= 1.00          n= 574  mean  24.59bp  p95 116.61bp
 ```
 
-Three properties follow from that single line:
+Exactly where theory says it should be: nothing in the calls, everything in the
+puts, growing with maturity. Against a fit measured at 32bp, ignoring it would
+have been a bias larger than the thing being fitted.
+
+So the quotes are **de-Americanised** before they reach the surface. The premium
+is priced on a binomial lattice and stripped out:
+
+```
+sigma  ←  IV_BS( price − [ CRR_american(sigma) − CRR_european(sigma) ] )
+```
+
+iterated to a fixed point. The premium is a difference of two prices off the
+*same* lattice at the *same* sigma, so the tree's discretisation error cancels —
+which is why 150 steps suffice where pricing to that accuracy would need far
+more. The surface stays European and arbitrage-free; only the data stops being
+biased.
+
+That has a second consequence, and it is the part most implementations miss:
+**put-call parity is a theorem about European options**, so the forward fitted in
+step 1 from raw American mids is biased too — by close to 1% on an 18-month
+expiry. The two unknowns are circular (you need the forward to de-Americanise,
+and de-Americanised quotes to fit the forward), so `fit_forward` runs them as a
+short fixed point. Two passes cut the forward error by 7×.
+
+### 3. The model is a bounded correction, not a free-form fit — [`volsurface/neural/model.py`](volsurface/neural/model.py)
+
+```
+w(k, T) = w_SSVI(k, T) · [ 1 + α·tanh( net(k, T) ) ]
+```
+
+Three properties follow from that one line:
 
 - **Positivity is structural.** `w_SSVI > 0` and the bracket lives in
-  `[1-alpha, 1+alpha]`, so total variance is positive everywhere. No clamping,
-  no NaN in `sqrt(w)`.
+  `[1−α, 1+α]`, so total variance is positive everywhere. No clamping, no NaN in
+  `sqrt(w)`.
 - **Extrapolation degrades to SSVI, not to noise.** Far outside the quoted
   strikes the network saturates and the surface becomes a fixed multiple of an
   arbitrage-free parametric surface.
-- **The error is bounded before training starts.** With `alpha = 0.35` the fit is
-  never more than ~16% away from SSVI in vol terms — a guarantee you can state
-  in advance.
+- **The error is bounded before training starts.** With `α = 0.35` the fit is
+  never more than ~16% away from SSVI in vol terms — a guarantee you can state in
+  advance.
 
 The output layer is zero-initialised, so the model *starts* exactly at the prior
 and a failed run degrades to SSVI rather than to garbage.
 
-Inputs are `(k, sqrt(T), k/sqrt(T), k^2, k*sqrt(T))`. Standardised moneyness
-`k/sqrt(T)` matters: it is the coordinate in which smiles across maturities look
-alike, and handing it to the network saves it from learning the `sqrt(T)`
-scaling from a few hundred points.
+Inputs are `(k, √T, k/√T, k², k·√T)`. Standardised moneyness `k/√T` matters: it
+is the coordinate in which smiles across maturities look alike, and handing it to
+the network saves it from learning the `√T` scaling from a few hundred points.
 
-### 3. No-arbitrage is enforced where there is no data (`nn/arbitrage.py`)
-
-The two static conditions become penalties:
+### 4. No-arbitrage is enforced where there is no data — [`volsurface/neural/arbitrage.py`](volsurface/neural/arbitrage.py)
 
 ```
-calendar    dw/dT   >= 0
-butterfly   g(k,T)  >= 0,   g = (1 - k w_k/2w)^2 - (w_k^2/4)(1/4 + 1/w) + w_kk/2
+calendar    ∂w/∂T  ≥ 0
+butterfly   g(k,T) ≥ 0,   g = (1 − k·w_k/2w)² − (w_k²/4)(¼ + 1/w) + w_kk/2
 ```
 
-Each is `mean(relu(-violation)^2)`: zero when satisfied, quadratic in the depth
-of the breach. All derivatives come from `torch.autograd` with
-`create_graph=True` — exact, no finite-difference error floor to tune against.
+Each becomes `mean(relu(−violation)²)`: zero when satisfied, quadratic in the
+depth of the breach. All derivatives come from `torch.autograd` with
+`create_graph=True` — exact, no finite-difference error floor.
 
 **Where they are evaluated matters more than their weight.** They are imposed on
 random collocation points over a region 30% wider in strike than the quotes and
@@ -118,35 +160,48 @@ where quotes exist is nearly free and nearly useless: the wings and the gaps
 between expiries are exactly where an interpolating network invents negative
 densities.
 
-This is why the model runs in float64 with a smooth activation: the butterfly
+This is why the model runs in float64 with a smooth activation — the butterfly
 penalty differentiates twice, and a ReLU network has zero second derivative
 almost everywhere.
 
-### 4. Everything is scored by the same code (`core/diagnostics.py`)
+### 5. Everything is scored by the same code — [`volsurface/diagnostics.py`](volsurface/diagnostics.py)
 
-Neural, SVI and SSVI all implement `core.surface.VolSurface`, so they go through
-identical fit reports and arbitrage scans. Results are reported in vol space
-(what a paper quotes), in price space, and as the share of quotes re-priced
-inside the bid-ask (what a desk asks about).
+Neural, SVI and SSVI all implement `volsurface.surface.VolSurface`, so they pass
+through identical fit reports and arbitrage scans. Reporting fit *and* arbitrage
+together is the point: a comparison showing only RMSE ranks the wrong model
+first.
 
-## Quick start
+---
 
-```bash
-pip install -e ".[data,api,dev]"
+## Layout
 
-# offline — no network needed
-python -m scripts.fit_surface --synthetic --plot out/
-
-# live chain
-python -m scripts.fit_surface --ticker SPY --plot out/ --save out/spy.pt
-
-# ablation: how much does the SSVI prior actually contribute?
-python -m scripts.fit_surface --ticker SPY --prior flat
+```
+main.py                    the study, start to finish — press Run
+config.py                  every knob, one file
+volsurface/
+    chain.py               option chain -> clean (k, T, IV) cloud
+    american.py            binomial tree; de-Americanisation
+    blackscholes.py        closed-form price and Greeks
+    impliedvol.py          inversion, with an identifiability guard
+    surface.py             the VolSurface interface — everything is total variance
+    diagnostics.py         arbitrage scans and fit reports
+    svi.py                 raw SVI (quasi-explicit) and joint SSVI
+    report.py              scorecards and figures
+    montecarlo.py          independent numerical check on the analytic formula
+    conventions.py         day counts
+    neural/
+        prior.py           SSVI in torch, differentiable end to end
+        model.py           prior x bounded correction
+        arbitrage.py       autodiff penalties on collocation points
+        dataset.py         tensors and the stratified split
+        train.py           vega-weighted objective, penalty warm-up, early stopping
+tests/                     72 tests, no network required
 ```
 
+## Using it as a library
+
 ```python
-from marketdata import fetch_chain
-from nn import train_surface, compare, comparison_table
+from volsurface import fetch_chain, train_surface, compare, comparison_table
 
 chain  = fetch_chain("SPY")
 result = train_surface(chain)
@@ -155,61 +210,33 @@ print(comparison_table(compare(chain, result)))
 print(result.model.implied_vol([-0.1, 0.0, 0.1], [0.5, 0.5, 0.5]))
 ```
 
-### Service
+`use_live_data = False` in `config.py` (or `synthetic_snapshot()`) generates a
+chain from a known arbitrage-free SSVI surface — useful because any violation
+the diagnostics report on it is a defect in the *model*, not a feature of the
+market. On that data per-slice SVI edges the network out on RMSE and violates
+nothing, which is the expected result and worth stating: the network earns its
+keep on real quotes, not on data a parametric model already describes exactly.
 
-```bash
-uvicorn api.main:app --reload   # http://127.0.0.1:8000/docs
-```
+## Three things the tests pin down
 
-| endpoint | purpose |
-|---|---|
-| `POST /api/surface/fit` | calibrate a ticker, return a handle and the full scorecard |
-| `POST /api/surface/iv` | implied vol at any `(k, T)` — **with `dw/dT` and `g` alongside** |
-| `POST /api/surface/price` | price a listed or unlisted strike off the surface |
-| `GET /api/surface/arbitrage` | rescan the fitted surface |
-| `GET /api/surface/grid` | dense IV grid for plotting |
-| `POST /api/price/black-scholes` | closed-form reference price and Greeks |
-
-Calibration runs on demand and is cached under a handle; every other endpoint is
-a lookup. That split mirrors a real vol service, where calibration runs on a
-schedule and pricing runs on every request.
-
-## Layout
-
-```
-marketdata/chain.py     option chain -> clean (k, T, IV) cloud; forward from parity
-core/surface.py         the VolSurface interface: everything is total variance
-core/diagnostics.py     arbitrage scans and fit reports, model-agnostic
-baselines/svi.py        raw SVI (quasi-explicit calibration) and joint SSVI
-nn/prior.py             SSVI in torch, differentiable end to end
-nn/model.py             the network: prior x bounded correction
-nn/arbitrage.py         autodiff no-arbitrage penalties on collocation points
-nn/train.py             vega-weighted objective, penalty warm-up, early stopping
-nn/evaluate.py          scorecard and plots
-options/                Black-Scholes and implied vol (the surface's ground truth),
-                        plus binomial and Monte Carlo as independent checks on them
-api/                    FastAPI service
-```
-
-## Two things the tests pin down
-
-**Implied vol is not always recoverable.** A deep ITM call at low vol is worth
-its intrinsic value to the last bit of a float64: at `S=100, K=70, T=0.6`, every
-sigma below ~7% produces the *identical* double. Any root finder returns a
-number there and that number is meaningless, so `options.implied_vol` refuses
-instead — a silently wrong IV would enter the surface fit as a real data point.
-(`test_implied_vol_refuses_when_the_price_does_not_identify_a_vol`)
+**Implied vol is not always recoverable.** At `S=100, K=70, T=0.6` every sigma
+below ~7% produces the *identical* float64. Any root finder returns a number and
+that number is meaningless, so `impliedvol` refuses instead — a silently wrong IV
+would enter the surface fit as a real data point.
 
 **SVI cannot be calibrated by a naive five-parameter search.** The objective has
-long flat valleys where `rho -> -1` trades off against `sigma -> 0`, and a
-simplex started at a fixed point walks into them and returns a degenerate slice
-with a large negative `a`. It looks converged and prices nonsense. `baselines`
-uses the Zeliade quasi-explicit method instead: for fixed `(m, sigma)` the model
-is *linear* in the rest, so a constrained linear least squares sits inside a
-2-D search that a multi-start simplex can actually cover.
+long flat valleys where `ρ → −1` trades off against `σ → 0`; a simplex started at
+a fixed point walks into them and returns a degenerate slice with a large
+negative `a`. It looks converged and prices nonsense. `svi.py` uses the Zeliade
+quasi-explicit method: for fixed `(m, σ)` the model is *linear* in the rest, so a
+constrained linear least squares sits inside a 2-D multi-start search.
+
+**A dividend yield must enter the lattice drift, not the spot.** Folding it in as
+`S·e^{−qT}` reproduces the European price exactly — which is why it is tempting —
+and puts the American exercise boundary in the wrong place.
 
 ```bash
-pytest        # 74 tests, no network required
+pytest
 ```
 
 ## References
@@ -222,4 +249,4 @@ pytest        # 74 tests, no network required
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

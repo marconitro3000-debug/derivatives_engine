@@ -1,5 +1,5 @@
 """
-baselines/svi.py
+volsurface/svi.py
 The parametric surfaces the neural model has to beat: raw SVI and SSVI.
 
 **Raw SVI** (Gatheral 2004) fits one smile at a time:
@@ -26,7 +26,7 @@ price is rigidity: three global shape parameters cannot follow a real smile that
 changes character between the front week and the one-year point.
 
 That trade-off -- flexible and unsafe, or safe and rigid -- is the gap the
-penalised neural surface in `nn/` is built to close.
+penalised neural surface in `volsurface/neural/` is built to close.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import differential_evolution, minimize
 
-from core.surface import VolSurface
+from volsurface.surface import VolSurface
 
 
 # -- raw SVI ------------------------------------------------------------------
@@ -145,15 +145,23 @@ def calibrate_svi(log_moneyness: np.ndarray, total_var: np.ndarray,
         return _svi_inner_solve((k - m) / s, w, wts, s)[1]
 
     # Multi-start: the (m, sigma) surface is smooth but not unimodal, and the
-    # right basin depends on how skewed the smile is.
+    # right basin depends on how skewed the smile is. Nine starts over a
+    # two-dimensional space is enough to find it; the tolerances are loose
+    # because the inner solve, not the outer search, sets the final accuracy.
     k_span = max(float(k.max() - k.min()), 1e-3)
     best_x, best_val = None, np.inf
     for m0 in (-0.3 * k_span, 0.0, 0.3 * k_span):
         for s0 in (0.05, 0.2, 0.6):
             res = minimize(outer, [m0, np.log(s0)], method="Nelder-Mead",
-                           options={"maxiter": 2000, "xatol": 1e-8, "fatol": 1e-14})
+                           options={"maxiter": 400, "xatol": 1e-6, "fatol": 1e-12})
             if res.fun < best_val:
                 best_val, best_x = float(res.fun), res.x
+
+    # Polish the winning basin at full tolerance.
+    res = minimize(outer, best_x, method="Nelder-Mead",
+                   options={"maxiter": 2000, "xatol": 1e-9, "fatol": 1e-14})
+    if res.fun < best_val:
+        best_x = res.x
 
     m, s = float(best_x[0]), float(np.exp(best_x[1]))
     (a, d, c), _ = _svi_inner_solve((k - m) / s, w, wts, s)
@@ -241,7 +249,7 @@ class SVISliceSurface(VolSurface):
 
     Deliberately the naive desk construction: fit each smile as well as
     possible, then join the slices. Nothing enforces consistency between them,
-    which is precisely why `core.diagnostics.scan_arbitrage` finds calendar
+    which is precisely why `volsurface.diagnostics.scan_arbitrage` finds calendar
     violations in the gaps between listed expiries.
     """
 
@@ -293,7 +301,7 @@ class SSVISurface(VolSurface):
     piecewise-linearly through the origin, so ``dw/dT >= 0`` holds everywhere
     rather than only at the nodes. Beyond the last listed expiry it extrapolates
     at the final slope, which preserves monotonicity where a spline would turn
-    over. Linear interpolation is also what lets `nn.prior.TorchSSVIPrior`
+    over. Linear interpolation is also what lets `volsurface.neural.prior.TorchSSVIPrior`
     reproduce this surface exactly in torch -- a smoother scheme would leave the
     neural model correcting a prior subtly different from the one reported here.
     """

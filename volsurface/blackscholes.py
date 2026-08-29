@@ -1,5 +1,5 @@
 """
-options/black_scholes.py
+volsurface/blackscholes.py
 Analytical Black-Scholes pricing and Greeks for European options.
 """
 

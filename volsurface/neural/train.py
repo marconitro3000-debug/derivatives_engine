@@ -1,5 +1,5 @@
 """
-nn/train.py
+volsurface/neural/train.py
 Fitting the neural surface.
 
 Objective
@@ -16,7 +16,7 @@ scale grows with maturity, which silently reweights the one-year smile ten times
 harder than the one-month. Vol-space errors are what a trader quotes and what a
 model is judged on.
 
-**Quotes are vega-weighted.** `marketdata.chain` attaches a weight of roughly
+**Quotes are vega-weighted.** `volsurface.chain` attaches a weight of roughly
 vega / spread to every quote. Unweighted least squares in vol space chases deep
 wing options whose vol is barely identified by their price, at the expense of
 the at-the-money region where the money is.
@@ -45,11 +45,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from baselines.svi import SSVISurface
-from nn.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties
-from nn.dataset import SurfaceTensors, stratified_split, to_tensors
-from nn.model import ModelConfig, NeuralVolSurface
-from nn.prior import FlatPrior, TorchSSVIPrior
+from volsurface.svi import SSVISurface
+from volsurface.neural.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties
+from volsurface.neural.dataset import SurfaceTensors, stratified_split, to_tensors
+from volsurface.neural.model import ModelConfig, NeuralVolSurface
+from volsurface.neural.prior import FlatPrior, TorchSSVIPrior
 
 
 @dataclass
@@ -105,7 +105,7 @@ def train_surface(snapshot, config: TrainConfig | None = None,
 
     Parameters
     ----------
-    snapshot : `marketdata.chain.ChainSnapshot`
+    snapshot : `volsurface.chain.ChainSnapshot`
     config   : training hyper-parameters; defaults are tuned for a liquid
                single-name or index chain of a few hundred quotes.
     prior    : ``"ssvi"`` (calibrate SSVI first and learn the correction) or

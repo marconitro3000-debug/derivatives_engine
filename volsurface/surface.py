@@ -1,5 +1,5 @@
 """
-core/surface.py
+volsurface/surface.py
 The one interface every volatility surface in this repo implements.
 
 A surface is defined by its **total implied variance**
@@ -13,7 +13,7 @@ at ``T -> 0`` and grow with maturity. Models are therefore compared, penalised
 and plotted in ``w`` space, and implied vol is a derived quantity.
 
 Implementing `total_variance` is enough to get IV, prices, and the full
-arbitrage diagnostic suite in `core.diagnostics` for free.
+arbitrage diagnostic suite in `volsurface.diagnostics` for free.
 """
 
 from __future__ import annotations

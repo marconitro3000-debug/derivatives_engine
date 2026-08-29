@@ -1,0 +1,51 @@
+============================================================================================
+  NEURAL IMPLIED-VOLATILITY SURFACE  |  SPY
+============================================================================================
+
+-- 1/4  option chain -----------------------------------------------------------------------
+source   live option chain (Yahoo Finance)
+SPY @ 2026-08-29  spot=771.10
+  1400 quotes across 8 expiries (0.036y - 1.800y)
+  k range [-0.997, +0.584]  IV range [8.7%, 65.7%]
+
+  american exercise:
+  removed 13.27bp of vol on average (median 0.99, p95 67.85, max 262.53)
+    calls   0.27bp mean   puts  20.16bp mean
+    T in [0.00, 0.15)  n= 321  mean   0.41bp  p95   2.38bp
+    T in [0.15, 0.50)  n= 341  mean   7.43bp  p95  26.88bp
+    T in [0.50, 1.00)  n= 164  mean  10.98bp  p95  50.63bp
+    T >= 1.00          n= 574  mean  24.59bp  p95 116.61bp
+
+-- 2/4  training the neural surface --------------------------------------------------------
+  w(k,T) = w_SSVI(k,T) * [1 + alpha*tanh(net(k,T))]     alpha = 0.35, hidden = (64, 64, 64)
+  penalties: dw/dT >= 0 and Durrleman g >= 0, on 2048 collocation points per epoch
+
+trained 1500 epochs in 114.2s (best epoch 1460)
+  train IV RMSE 32.9bp  val IV RMSE 26.6bp  (n_train=1120, n_val=280)
+  final worst dw/dT +1.12e-02  worst g +1.81e-03
+
+-- 3/4  scorecard --------------------------------------------------------------------------
+surface                              IV RMSE   max err   px RMSE  in spread  cal viol  bfly viol
+------------------------------------------------------------------------------------------------
+Neural (SSVI prior + penalties)        31.7bp    598.6bp    0.3587       8.9%     0.00%      0.00%
+SVI (per-slice)                        49.3bp    558.4bp    0.5783       5.6%     0.81%      0.05%
+SSVI (joint)                          115.8bp   1414.8bp    1.0710       2.1%     0.00%      0.00%
+
+  IV RMSE     vega-weighted implied-vol error against the quotes
+  max err     worst single-quote vol error
+  px RMSE     the same fit measured in price space
+  in spread   share of quotes re-priced inside the bid-ask
+  cal viol  ) share of a dense (k,T) grid - extending past the quoted
+  bfly viol ) strikes - that admits calendar / butterfly arbitrage
+
+-- 4/4  output -----------------------------------------------------------------------------
+  model    results\spy_surface.pt
+  figures  results\smiles.png
+           results\arbitrage_neural.png
+           results\arbitrage_svi.png
+           results\arbitrage_ssvi.png
+  report   results\report.txt
+
+============================================================================================
+  done in 198.8s
+============================================================================================

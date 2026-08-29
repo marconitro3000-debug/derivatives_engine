@@ -1,53 +1,24 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg
 *.egg-info/
-dist/
 build/
-.eggs/
+dist/
+.pytest_cache/
 
-# Virtual environments
+# Environments
 .venv/
 venv/
 env/
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb_checkpoints
+# Run output
+results/
+*.pt
 
-# Data / databases
-*.db
-*.sqlite
-*.sqlite3
-
-# IDE
-.vscode/
+# Editors / OS
+.vscode/*
+!.vscode/launch.json
 .idea/
-*.sublime-project
-*.sublime-workspace
-
-# OS
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Generated figures / demo output
-output/
-_test_output.png
-
-# Distribution
-*.tar.gz
-*.whl
-
-# Logs
-*.log
-
-# Run artefacts
-out/
-*.pt
-__pycache__/
-.pytest_cache/

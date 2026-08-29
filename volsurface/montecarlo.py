@@ -1,6 +1,13 @@
 """
-options/monte_carlo.py
-Monte Carlo pricing under GBM with variance-reduction techniques.
+volsurface/montecarlo.py
+Monte Carlo under GBM -- the second independent check on the analytic formula.
+
+Nothing in the surface pipeline calls this. It exists so that the closed-form
+Black-Scholes price the whole project inverts is verified by two unrelated
+numerical methods: `tests/test_numerical_pricers.py` requires the analytic price
+to fall inside this estimator's 95% confidence interval and requires the
+`volsurface.american` lattice to converge to it. If all three ever disagree, the
+analytic formula is the first place to look.
 
 Supported payoffs
 -----------------
@@ -19,7 +26,7 @@ Variance-reduction techniques
 import numpy as np
 from typing import Literal
 
-from .black_scholes import price as bs_price
+from .blackscholes import price as bs_price
 
 
 # ── payoff functions ──────────────────────────────────────────────────────────

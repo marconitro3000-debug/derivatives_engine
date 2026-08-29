@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from baselines.svi import SSVIParams, SSVISurface, SVIParams, SVISliceSurface, calibrate_svi
-from core.diagnostics import scan_arbitrage
+from volsurface.svi import SSVIParams, SSVISurface, SVIParams, SVISliceSurface, calibrate_svi
+from volsurface.diagnostics import scan_arbitrage
 
 
 # -- raw SVI ------------------------------------------------------------------
@@ -74,7 +74,7 @@ def test_per_slice_svi_fits_better_but_admits_arbitrage(noisy_chain):
     interpolation between those independently fitted slices is exactly where
     calendar arbitrage appears.
     """
-    from core.diagnostics import fit_report
+    from volsurface.diagnostics import fit_report
 
     svi = SVISliceSurface.fit(noisy_chain)
     ssvi = SSVISurface.fit(noisy_chain)

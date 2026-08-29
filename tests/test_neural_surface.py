@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 import torch
 
-from baselines.svi import SSVISurface
-from core.diagnostics import scan_arbitrage
-from nn.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties, durrleman_g
-from nn.dataset import stratified_split, to_tensors
-from nn.model import ModelConfig, NeuralVolSurface
-from nn.prior import FlatPrior, TorchSSVIPrior
-from nn.train import TrainConfig, train_surface
+from volsurface.svi import SSVISurface
+from volsurface.diagnostics import scan_arbitrage
+from volsurface.neural.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties, durrleman_g
+from volsurface.neural.dataset import stratified_split, to_tensors
+from volsurface.neural.model import ModelConfig, NeuralVolSurface
+from volsurface.neural.prior import FlatPrior, TorchSSVIPrior
+from volsurface.neural.train import TrainConfig, train_surface
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +90,7 @@ def test_autograd_derivatives_match_finite_differences(model):
     k = np.linspace(-0.3, 0.3, 15)
     T = np.full_like(k, 0.6)
 
-    from core.surface import VolSurface
+    from volsurface.surface import VolSurface
 
     assert np.allclose(model.dw_dk(k, T), VolSurface.dw_dk(model, k, T), atol=1e-6)
     assert np.allclose(model.d2w_dk2(k, T), VolSurface.d2w_dk2(model, k, T), atol=1e-4)
@@ -225,7 +225,7 @@ def trained(noisy_chain):
 
 def test_training_improves_on_the_prior(noisy_chain, trained):
     """If the network cannot beat SSVI on its own training data, it is not working."""
-    from core.diagnostics import fit_report
+    from volsurface.diagnostics import fit_report
 
     neural = fit_report(trained.model, noisy_chain).rmse_vol_bps
     prior = fit_report(trained.prior_surface, noisy_chain).rmse_vol_bps
@@ -243,7 +243,7 @@ def test_trained_surface_is_arbitrage_free(noisy_chain, trained):
 
 def test_flat_prior_ablation_runs_and_still_fits(noisy_chain):
     """Without the SSVI prior the network must still produce a usable surface."""
-    from core.diagnostics import fit_report
+    from volsurface.diagnostics import fit_report
 
     cfg = TrainConfig(epochs=250, warmup_epochs=60, patience=250, seed=0)
     cfg.penalties.n_points = 512

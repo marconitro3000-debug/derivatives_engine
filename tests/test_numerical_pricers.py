@@ -11,9 +11,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from options.binomial_tree import binomial_price
-from options.black_scholes import price
-from options.monte_carlo import mc_price
+from volsurface.american import binomial_price
+from volsurface.blackscholes import price
+from volsurface.montecarlo import mc_price
 
 
 S, K, T, R, SIGMA = 100.0, 105.0, 1.0, 0.04, 0.25
@@ -48,6 +48,61 @@ def test_american_put_is_worth_more_than_the_european_put():
     res = binomial_price(S, K, T, R, SIGMA, "put", style="american", n_steps=400)
     assert res["early_exercise"] > 0.0
     assert res["price"] > price(S, K, T, R, SIGMA, "put")
+
+
+@pytest.mark.parametrize("option", ["call", "put"])
+def test_binomial_matches_black_scholes_with_a_dividend_yield(option):
+    """The yield must enter the drift, not be folded into the spot.
+
+    Both routes give the same European price, which is why the shortcut is
+    tempting; only the drift version puts the American exercise boundary in the
+    right place, so this test guards the European leg and
+    `test_dividend_yield_changes_the_american_premium` guards the rest.
+    """
+    q = 0.03
+    exact = price(S, K, T, R, SIGMA, option, q)
+    tree = binomial_price(S, K, T, R, SIGMA, option, n_steps=800, q=q)["price"]
+    assert tree == pytest.approx(exact, abs=5e-3)
+
+
+def test_dividend_yield_changes_the_american_premium():
+    """A dividend yield makes early exercise of a call possible at all.
+
+    With q = 0 the American call premium is exactly zero; raising q above the
+    rate makes holding the call costly and the premium turns positive. Folding
+    the yield into the spot would leave it at zero and hide the effect.
+    """
+    no_div = binomial_price(S, K, T, R, SIGMA, "call", style="american",
+                            n_steps=400, q=0.0)["early_exercise"]
+    with_div = binomial_price(S, K, T, R, SIGMA, "call", style="american",
+                              n_steps=400, q=0.10)["early_exercise"]
+    assert no_div == pytest.approx(0.0, abs=1e-8)
+    assert with_div > 1e-3
+
+
+def test_de_americanised_iv_recovers_the_lattice_vol():
+    """Price American on a fine lattice, invert with the coarse one, get the vol back.
+
+    The point of the construction: the premium is a difference of two prices off
+    the *same* coarse lattice, so its discretisation error cancels and 150 steps
+    suffice even though pricing to this accuracy would need far more.
+    """
+    from volsurface.american import de_americanised_iv
+    from volsurface.impliedvol import implied_vol
+
+    S, K, T, r, q, sigma = 100.0, 85.0, 1.5, 0.045, 0.01, 0.25
+    F = S * np.exp((r - q) * T)
+    DF = float(np.exp(-r * T))
+    mkt = binomial_price(S, K, T, r, sigma, "put", style="american",
+                         n_steps=600, q=q)["price"]
+
+    naive = implied_vol(F, K, T, 0.0, mkt / DF, "put")
+    fixed, euro_price = de_americanised_iv(S, K, T, r, q, F, DF, mkt, "put",
+                                           naive, n_steps=150)
+
+    assert abs(fixed - sigma) < 2e-3
+    assert abs(fixed - sigma) < abs(naive - sigma) / 3
+    assert euro_price < mkt                    # the premium is stripped out
 
 
 def test_binomial_rejects_bad_arguments():

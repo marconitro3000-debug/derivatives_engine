@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from marketdata import synthetic_snapshot
+from volsurface.chain import synthetic_snapshot
 
 
 @pytest.fixture(scope="session")

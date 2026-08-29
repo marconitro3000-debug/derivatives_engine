@@ -1,13 +1,13 @@
 """
-nn/evaluate.py
+volsurface/report.py
 Scoring the neural surface against the parametric baselines, on equal terms.
 
 Every surface -- per-slice SVI, joint SSVI, neural -- implements
-`core.surface.VolSurface`, so the same two reports apply to all of them:
+`volsurface.surface.VolSurface`, so the same two reports apply to all of them:
 
-* `core.diagnostics.fit_report`: how well it reproduces the quotes it was fitted
+* `volsurface.diagnostics.fit_report`: how well it reproduces the quotes it was fitted
   to, in vol space and in price space.
-* `core.diagnostics.scan_arbitrage`: whether the surface it defines *between*
+* `volsurface.diagnostics.scan_arbitrage`: whether the surface it defines *between*
   those quotes admits static arbitrage.
 
 Reporting both together is the point of the project. Per-slice SVI wins the
@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.diagnostics import ArbitrageReport, FitReport, fit_report, scan_arbitrage
-from core.surface import VolSurface
+from volsurface.diagnostics import ArbitrageReport, FitReport, fit_report, scan_arbitrage
+from volsurface.surface import VolSurface
 
 
 @dataclass
@@ -94,7 +94,7 @@ def compare(snapshot, result, include_baselines: bool = True) -> list[SurfaceSco
     degenerate smile) is skipped with a note rather than aborting the run --
     losing the SVI column should not cost you the neural result.
     """
-    from baselines.svi import SSVISurface, SVISliceSurface
+    from volsurface.svi import SSVISurface, SVISliceSurface
 
     scores = [evaluate_surface(result.model, snapshot)]
 
@@ -176,7 +176,7 @@ def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None):
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from core.diagnostics import butterfly_g
+    from volsurface.diagnostics import butterfly_g
 
     k_lo, k_hi = snapshot.k.min(), snapshot.k.max()
     pad = 0.25 * (k_hi - k_lo)

@@ -1,8 +1,8 @@
 """
-marketdata/chain.py
+volsurface/chain.py
 Raw option chain -> clean implied-volatility point cloud.
 
-The quality of an implied-vol surface is decided here, not in the model. Four
+The quality of an implied-vol surface is decided here, not in the model. Five
 things matter and each is done explicitly rather than delegated to the data
 vendor:
 
@@ -28,9 +28,18 @@ vendor:
 
 4. **In-house IV inversion.** Vendor ``impliedVolatility`` fields are computed
    with the vendor's own rate and dividend assumptions and are frequently wrong
-   in the wings. The IVs here come from ``options.implied_vol`` applied to the
+   in the wings. The IVs here come from ``volsurface.impliedvol`` applied to the
    forward-measure price ``mid / DF``, so they are consistent with the forward
    fitted in step 2.
+
+5. **De-Americanisation.** Listed equity and ETF options are American. A
+   European inversion has nowhere to put the early-exercise premium and charges
+   it to volatility instead -- on SPY that is around 12bp of vol beyond a year,
+   and it is not uniform: it sits almost entirely in the puts and grows with
+   maturity. `volsurface.american` prices the premium on a lattice and strips it
+   out, and `fit_forward` iterates that together with step 2, because put-call
+   parity is a theorem about European options and the forward fitted from raw
+   American mids is biased too.
 
 Every quote also carries a fitting weight built from Black-Scholes vega and the
 quoted spread: an IV error on a 0.05-vega wing option is worth far less than the
@@ -45,9 +54,10 @@ from datetime import date, datetime
 
 import numpy as np
 
-from core.daycount import year_fraction
-from options.black_scholes import greeks, price as bs_price
-from options.implied_vol import implied_vol
+from volsurface.american import carry_from_forward, de_americanised_iv
+from volsurface.conventions import year_fraction
+from volsurface.blackscholes import greeks, price as bs_price
+from volsurface.impliedvol import implied_vol
 
 
 # -- snapshot container -------------------------------------------------------
@@ -67,12 +77,14 @@ class ChainSnapshot:
 
     k: np.ndarray            # log(K / F_T)
     T: np.ndarray            # year fraction to expiry (ACT/365F)
-    iv: np.ndarray           # in-house Black-Scholes implied vol
+    iv: np.ndarray           # implied vol actually fitted (de-Americanised)
+    iv_european: np.ndarray  # the same quotes inverted as if they were European
     weight: np.ndarray       # fitting weight (vega / spread, mean-normalised)
 
     strike: np.ndarray
     is_call: np.ndarray      # bool: True for calls (OTM above the forward)
-    mid: np.ndarray          # mid price
+    mid: np.ndarray          # quoted mid price (American, as traded)
+    mid_european: np.ndarray # the same quote with its early-exercise premium removed
     spread: np.ndarray       # absolute bid-ask spread
     vega: np.ndarray         # BS vega per 1.00 of vol
 
@@ -96,12 +108,23 @@ class ChainSnapshot:
         kept = set(np.unique(self.T[mask]).tolist())
         return ChainSnapshot(
             ticker=self.ticker, asof=self.asof, spot=self.spot,
-            k=self.k[mask], T=self.T[mask], iv=self.iv[mask], weight=self.weight[mask],
+            k=self.k[mask], T=self.T[mask], iv=self.iv[mask],
+            iv_european=self.iv_european[mask], weight=self.weight[mask],
             strike=self.strike[mask], is_call=self.is_call[mask], mid=self.mid[mask],
+            mid_european=self.mid_european[mask],
             spread=self.spread[mask], vega=self.vega[mask],
             forwards={t: f for t, f in self.forwards.items() if t in kept},
             discounts={t: d for t, d in self.discounts.items() if t in kept},
         )
+
+    @property
+    def early_exercise_bp(self) -> np.ndarray:
+        """Per-quote bias, in bp of vol, that a European inversion would have had.
+
+        Zero everywhere if the chain was built with ``de_americanize=False``, in
+        which case `iv` and `iv_european` are the same array.
+        """
+        return (self.iv_european - self.iv) * 10_000.0
 
     def __len__(self) -> int:
         return len(self.k)
@@ -114,6 +137,27 @@ class ChainSnapshot:
             f"  k range [{self.k.min():+.3f}, {self.k.max():+.3f}]  "
             f"IV range [{self.iv.min():.1%}, {self.iv.max():.1%}]"
         )
+
+    def early_exercise_summary(self) -> str:
+        """How much volatility a European inversion would have invented."""
+        bias = self.early_exercise_bp
+        if not np.any(bias > 1e-9):
+            return "  de-Americanisation off: quotes inverted as European"
+
+        calls, puts = bias[self.is_call], bias[~self.is_call]
+        lines = [
+            f"  removed {bias.mean():.2f}bp of vol on average "
+            f"(median {np.median(bias):.2f}, p95 {np.percentile(bias, 95):.2f}, "
+            f"max {bias.max():.2f})",
+            f"    calls {calls.mean():6.2f}bp mean   puts {puts.mean():6.2f}bp mean",
+        ]
+        for lo, hi in ((0.0, 0.15), (0.15, 0.5), (0.5, 1.0), (1.0, 99.0)):
+            sel = bias[(self.T >= lo) & (self.T < hi)]
+            if sel.size:
+                label = f"T in [{lo:.2f}, {hi:.2f})" if hi < 90 else f"T >= {lo:.2f}"
+                lines.append(f"    {label:<18} n={sel.size:4d}  "
+                             f"mean {sel.mean():6.2f}bp  p95 {np.percentile(sel, 95):6.2f}bp")
+        return "\n".join(lines)
 
 
 # -- forward / discount from put-call parity ----------------------------------
@@ -166,6 +210,68 @@ def implied_forward(strikes: np.ndarray, calls: np.ndarray, puts: np.ndarray,
     return float(forward), float(df)
 
 
+def fit_forward(spot: float, strikes: np.ndarray,
+                call_mid: np.ndarray, put_mid: np.ndarray,
+                call_spread: np.ndarray, put_spread: np.ndarray,
+                T: float, *, de_americanize: bool = True,
+                lattice_steps: int = 150, fallback_rate: float = 0.04,
+                n_passes: int = 2) -> tuple[float, float]:
+    """Forward and discount factor from parity, corrected for American exercise.
+
+    `implied_forward` fits ``C(K) - P(K) = DF * (F - K)``. That identity is a
+    theorem about *European* options. Listed equity and ETF options are
+    American, their early-exercise premia differ between the call and the put
+    and vary with strike, so ``C - P`` is not a straight line in ``K`` and the
+    regression returns a biased slope -- a biased discount factor, and through
+    it a biased forward. On an eighteen-month SPY expiry the error is close to a
+    full percent of the forward, which is a systematic tilt through the entire
+    fitted skew.
+
+    The fix is a short fixed point, because the two unknowns are circular: the
+    forward is needed to de-Americanise a quote, and de-Americanised quotes are
+    needed to fit the forward.
+
+        1. fit (F, DF) from the raw American mids
+        2. strip the early-exercise premium off every matched call and put
+        3. refit (F, DF) on the European-equivalent prices
+        4. repeat once
+
+    Two passes are enough: the premium depends on the forward only weakly, so
+    the second correction is already an order of magnitude smaller than the
+    first.
+    """
+    weights = 1.0 / (call_spread + put_spread + 1e-6)
+    F, DF = implied_forward(strikes, call_mid, put_mid, weights=weights)
+    if not de_americanize:
+        return F, DF
+
+    for _ in range(n_passes):
+        r, q = carry_from_forward(spot, F, DF, T)
+        euro_c, euro_p = [], []
+        for i, K in enumerate(strikes):
+            euro_c.append(_european_equivalent(spot, float(K), T, r, q, F, DF,
+                                               float(call_mid[i]), "call", lattice_steps))
+            euro_p.append(_european_equivalent(spot, float(K), T, r, q, F, DF,
+                                               float(put_mid[i]), "put", lattice_steps))
+        try:
+            F, DF = implied_forward(strikes, np.array(euro_c), np.array(euro_p),
+                                    weights=weights)
+        except ValueError:
+            break                      # keep the last plausible fit
+    return F, DF
+
+
+def _european_equivalent(spot, K, T, r, q, F, DF, mid, option, lattice_steps) -> float:
+    """Quote minus its early-exercise premium; the raw mid if that is not computable."""
+    try:
+        sigma_e = implied_vol(F, K, T, 0.0, mid / DF, option)
+    except ValueError:
+        return mid                     # unfittable quote: leave it alone
+    _, euro = de_americanised_iv(spot, K, T, r, q, F, DF, mid, option,
+                                 sigma_e, n_steps=lattice_steps)
+    return euro
+
+
 # -- quote cleaning -----------------------------------------------------------
 
 def _clean_side(df, min_open_interest: int, max_rel_spread: float):
@@ -203,14 +309,16 @@ def build_snapshot(
     moneyness_range: tuple[float, float] = (-1.0, 0.6),
     min_T: float = 0.02,
     max_T: float = 2.0,
+    de_americanize: bool = True,
+    lattice_steps: int = 150,
 ) -> ChainSnapshot:
     """Assemble a `ChainSnapshot` from per-expiry ``(calls_df, puts_df)`` frames.
 
     Split out from `fetch_chain` so the cleaning logic is testable against
     fixture frames without touching the network.
     """
-    k_all, T_all, iv_all = [], [], []
-    K_all, call_all, mid_all, spr_all, vega_all = [], [], [], [], []
+    k_all, T_all, iv_all, ive_all = [], [], [], []
+    K_all, call_all, mid_all, mide_all, spr_all, vega_all = [], [], [], [], [], []
     forwards: dict[float, float] = {}
     discounts: dict[float, float] = {}
 
@@ -232,11 +340,11 @@ def build_snapshot(
         try:
             cm = calls.set_index("strike").loc[matched]
             pm = puts.set_index("strike").loc[matched]
-            F, DF = implied_forward(
-                matched,
-                cm["mid"].to_numpy(),
-                pm["mid"].to_numpy(),
-                weights=1.0 / (cm["spread"].to_numpy() + pm["spread"].to_numpy() + 1e-6),
+            F, DF = fit_forward(
+                spot, matched,
+                cm["mid"].to_numpy(), pm["mid"].to_numpy(),
+                cm["spread"].to_numpy(), pm["spread"].to_numpy(),
+                T, de_americanize=de_americanize, lattice_steps=lattice_steps,
             )
         except (ValueError, KeyError):
             DF = float(np.exp(-fallback_rate * T))
@@ -268,12 +376,26 @@ def build_snapshot(
                 if v <= 0:
                     continue
 
+                # Listed equity/ETF options are American; a European inversion
+                # charges the early-exercise premium to volatility. Price the
+                # premium on a lattice and take it back out.
+                sigma_european = sigma
+                mid_european = mid
+                if de_americanize:
+                    r_exp, q_exp = carry_from_forward(spot, F, DF, T)
+                    sigma, mid_european = de_americanised_iv(
+                        spot, K, T, r_exp, q_exp, F, DF, mid, option,
+                        sigma_european, n_steps=lattice_steps,
+                    )
+
                 k_all.append(k)
                 T_all.append(T)
                 iv_all.append(sigma)
+                ive_all.append(sigma_european)
                 K_all.append(K)
                 call_all.append(is_call)
                 mid_all.append(mid)
+                mide_all.append(mid_european)
                 spr_all.append(float(row["spread"]))
                 vega_all.append(float(v))
 
@@ -295,9 +417,11 @@ def build_snapshot(
     return ChainSnapshot(
         ticker=ticker, asof=asof, spot=float(spot),
         k=np.array(k_all), T=np.array(T_all), iv=np.array(iv_all),
+        iv_european=np.array(ive_all),
         weight=raw_w / raw_w.mean(),
         strike=np.array(K_all), is_call=np.array(call_all, dtype=bool),
-        mid=np.array(mid_all), spread=spread, vega=vega,
+        mid=np.array(mid_all), mid_european=np.array(mide_all),
+        spread=spread, vega=vega,
         forwards=forwards, discounts=discounts,
     )
 
@@ -385,7 +509,7 @@ def synthetic_snapshot(
     diagnostics report on a fit of this data is a defect in the *model*, not a
     feature of the market.
     """
-    from baselines.svi import SSVIParams
+    from volsurface.svi import SSVIParams
 
     rng = np.random.default_rng(seed)
     ssvi = SSVIParams(rho=rho, eta=eta, gamma=gamma)
@@ -425,8 +549,10 @@ def synthetic_snapshot(
     return ChainSnapshot(
         ticker=ticker, asof=asof, spot=spot,
         k=np.array(k_all), T=np.array(T_all), iv=np.array(iv_all),
+        iv_european=np.array(iv_all),      # generated as European by construction
         weight=raw_w / raw_w.mean(),
         strike=np.array(K_all), is_call=np.array(call_all, dtype=bool),
-        mid=np.array(mid_all), spread=np.array(spr_all), vega=vega,
+        mid=np.array(mid_all), mid_european=np.array(mid_all),
+        spread=np.array(spr_all), vega=vega,
         forwards=forwards, discounts=discounts,
     )

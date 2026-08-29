@@ -1,8 +1,8 @@
 """
-nn/arbitrage.py
+volsurface/neural/arbitrage.py
 Soft no-arbitrage constraints, differentiated exactly.
 
-The two static conditions from `core.diagnostics` are turned into penalties the
+The two static conditions from `volsurface.diagnostics` are turned into penalties the
 optimiser can see:
 
     calendar   dw/dT      >= 0

@@ -1,5 +1,5 @@
 """
-core/diagnostics.py
+volsurface/diagnostics.py
 Static-arbitrage diagnostics for any `VolSurface`, and vol/price fit errors.
 
 Two conditions decide whether a total-variance surface ``w(k, T)`` is free of
@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.surface import VolSurface
+from volsurface.surface import VolSurface
 
 
 # -- results ------------------------------------------------------------------
@@ -172,6 +172,13 @@ def fit_report(surface: VolSurface, snapshot, weighted: bool = True) -> FitRepor
     share of quotes re-priced inside the bid-ask are the ones a desk asks about,
     because a 20bp vol error on a one-week wing option is free while the same
     error at the money is not.
+
+    The price comparison uses the chain's **European-equivalent** mids, not the
+    raw quotes. The surface is European by construction; the quotes are
+    American. Scoring a European model against American prices would charge it
+    for the early-exercise premium that `volsurface.american` deliberately
+    removed, which on a long-dated put wing is far larger than the fit error
+    being measured.
     """
     iv_model = surface.implied_vol(snapshot.k, snapshot.T)
     err = (iv_model - snapshot.iv) * 10_000.0                # basis points
@@ -188,7 +195,7 @@ def fit_report(surface: VolSurface, snapshot, weighted: bool = True) -> FitRepor
     put_model = call_model - discounts * (forwards - strike)
     px_model = np.where(snapshot.is_call, call_model, put_model)
 
-    px_err = px_model - snapshot.mid
+    px_err = px_model - snapshot.mid_european
     inside = np.abs(px_err) <= snapshot.spread / 2.0
 
     return FitReport(

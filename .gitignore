@@ -45,3 +45,9 @@ _test_output.png
 
 # Logs
 *.log
+
+# Run artefacts
+out/
+*.pt
+__pycache__/
+.pytest_cache/

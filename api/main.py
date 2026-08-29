@@ -1,18 +1,34 @@
+"""
+api/main.py
+FastAPI service exposing a fitted neural volatility surface.
+
+The service is deliberately thin. Fitting a surface takes seconds and holds a
+torch graph; serving one is a lookup. So `POST /api/surface/fit` trains a
+surface for a ticker and caches it in memory under a handle, and every other
+endpoint reads that cached surface. That split is also what a real vol service
+looks like: calibration runs on a schedule, pricing runs on every request.
+
+    uvicorn api.main:app --reload
+    open http://127.0.0.1:8000/docs
+"""
+
 from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes.market_data import router as market_data_router
-from api.routes.portfolio import router as portfolio_router
 from api.routes.pricing import router as pricing_router
-from api.routes.structured import router as structured_router
-from api.routes.term_sheet import router as term_sheet_router
-from api.routes.validation import router as validation_router
-from api.routes.vanilla_option import router as vanilla_option_router
-from db.database import init_db
+from api.routes.surface import router as surface_router
 
-app = FastAPI(title="Derivatives Engine API", version="0.2.0")
+app = FastAPI(
+    title="Neural Volatility Surface",
+    version="1.0.0",
+    description=(
+        "Fits an arbitrage-penalised neural implied-volatility surface to a live "
+        "option chain and serves implied vols, prices and no-arbitrage diagnostics "
+        "off it."
+    ),
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,20 +38,10 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
-
-
-@app.get("/api/health")
+@app.get("/api/health", tags=["meta"])
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "derivatives-engine"}
+    return {"status": "ok", "service": "neural-vol-surface"}
 
 
+app.include_router(surface_router)
 app.include_router(pricing_router)
-app.include_router(validation_router)
-app.include_router(structured_router)
-app.include_router(term_sheet_router)
-app.include_router(market_data_router)
-app.include_router(vanilla_option_router)
-app.include_router(portfolio_router)

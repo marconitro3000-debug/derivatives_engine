@@ -12,10 +12,12 @@ from .black_scholes import price, greeks
 # ── constants ─────────────────────────────────────────────────────────────────
 
 _MAX_ITER   = 100
-_TOL_PRICE  = 1e-8
+_TOL_SIGMA  = 1e-10     # convergence is judged on sigma, not on price (see below)
+_TOL_PRICE  = 1e-8      # arbitrage-bound slack only
 _TOL_VEGA   = 1e-12
 _SIGMA_LO   = 1e-6
 _SIGMA_HI   = 10.0      # 1000% vol ceiling
+_MIN_VEGA   = 1e-6      # below this the price does not identify a volatility
 
 
 # ── initial guess (Brenner-Subrahmanyam approximation) ───────────────────────
@@ -34,6 +36,17 @@ def _newton(S: float, K: float, T: float, r: float, market_price: float,
     """
     Newton-Raphson iteration: σ_{n+1} = σ_n − (BS(σ_n) − market) / vega(σ_n).
     Returns None if it fails to converge.
+
+    Convergence is declared on the *step in σ*, not on the price residual. Those
+    are not equivalent: a deep in- or out-of-the-money option has vega near zero,
+    so a wide band of volatilities reprices it to within any absolute price
+    tolerance, and a price-based stop happily returns whichever σ the iteration
+    happened to be standing on. Stopping when σ itself stops moving is the
+    condition that actually means the root has been located.
+
+    This is also why `marketdata.chain` fits only out-of-the-money quotes: no
+    stopping rule can recover a volatility the price does not encode, and for a
+    deep ITM option it barely does.
     """
     sigma = _sigma_init(S, K, T, r, market_price, option)
     for _ in range(_MAX_ITER):
@@ -41,9 +54,9 @@ def _newton(S: float, K: float, T: float, r: float, market_price: float,
         vega = greeks(S, K, T, r, sigma)["vega"] * 100   # undo the /100 scaling
         if abs(vega) < _TOL_VEGA:
             return None
-        sigma -= (p - market_price) / vega
-        sigma  = np.clip(sigma, _SIGMA_LO, _SIGMA_HI)
-        if abs(price(S, K, T, r, sigma, option) - market_price) < _TOL_PRICE:
+        step   = (p - market_price) / vega
+        sigma  = float(np.clip(sigma - step, _SIGMA_LO, _SIGMA_HI))
+        if abs(step) < _TOL_SIGMA:
             return sigma
     return None
 
@@ -72,7 +85,11 @@ def implied_vol(S: float, K: float, T: float, r: float,
 
     Raises
     ------
-    ValueError if no solution exists in [_SIGMA_LO, _SIGMA_HI].
+    ValueError
+        If the price is below intrinsic value (no arbitrage-free IV exists), if
+        no root is found in [_SIGMA_LO, _SIGMA_HI], or if the option's vega is so
+        small that the price does not identify a volatility at all -- see the
+        note at the end of this function.
     """
     disc = np.exp(-r * T)
     if option == "call":
@@ -87,17 +104,30 @@ def implied_vol(S: float, K: float, T: float, r: float,
         )
 
     sigma = _newton(S, K, T, r, market_price, option)
-    if sigma is not None:
-        return float(sigma)
+    if sigma is None:
+        f = lambda sig: price(S, K, T, r, sig, option) - market_price
+        try:
+            sigma = float(brentq(f, _SIGMA_LO, _SIGMA_HI, xtol=_TOL_PRICE, maxiter=500))
+        except ValueError:
+            raise ValueError(
+                f"Could not find IV for market_price={market_price:.4f}. "
+                "Check inputs or whether the price is arbitrage-free."
+            )
 
-    f = lambda sig: price(S, K, T, r, sig, option) - market_price
-    try:
-        return float(brentq(f, _SIGMA_LO, _SIGMA_HI, xtol=_TOL_PRICE, maxiter=500))
-    except ValueError:
+    # Identifiability check. Deep in-the-money options are worth their intrinsic
+    # value to the last bit of a float64 across a wide band of volatilities: at
+    # S=100, K=70, T=0.6, every sigma below ~7% produces the *same* double. Any
+    # root finder will return a number there, and that number is meaningless.
+    # Refusing is the only honest answer -- a silently wrong IV propagates into
+    # the surface fit as a real data point.
+    vega = greeks(S, K, T, r, sigma)["vega"] * 100.0
+    if vega < _MIN_VEGA:
         raise ValueError(
-            f"Could not find IV for market_price={market_price:.4f}. "
-            "Check inputs or whether the price is arbitrage-free."
+            f"implied vol is not identifiable at K={K:g}, T={T:g}: vega={vega:.2e} "
+            f"means the price does not distinguish volatilities. Use an "
+            f"out-of-the-money quote for this strike."
         )
+    return float(sigma)
 
 
 def iv_surface(S: float, strikes: list[float], maturities: list[float],

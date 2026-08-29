@@ -1,39 +1,44 @@
+"""
+api/routes/pricing.py
+Closed-form Black-Scholes pricing, independent of any fitted surface.
+
+Kept alongside the surface endpoints because it is the reference the surface is
+built on: an IV out of `/api/surface/iv` is only meaningful together with the
+pricing formula it inverts. Useful as a sanity check when a surface price looks
+wrong -- feed the surface's vol in here and confirm the two agree.
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from api.schemas import PhoenixRequest, model_to_dict
-from db.database import init_db, insert_pricing_run
-from structured.greeks import finite_difference_greeks
-from structured.heatmap import spot_vol_heatmap
-from structured.phoenix_autocall import PhoenixAutocallSpec, price_phoenix_autocall
-from structured.stress import run_stress_scenarios
-from structured.validation import validate_phoenix_spec
+from api.schemas import PriceRequest, PriceResponse
+from options.black_scholes import greeks, price
 
 router = APIRouter(prefix="/api/price", tags=["pricing"])
 
 
-def build_spec(req: PhoenixRequest) -> PhoenixAutocallSpec:
-    return PhoenixAutocallSpec(**req.to_engine_dict())
+@router.post("/black-scholes", response_model=PriceResponse)
+def black_scholes(req: PriceRequest) -> PriceResponse:
+    """European option price and Greeks under Black-Scholes with a dividend yield.
 
-
-@router.post("/phoenix")
-def price_phoenix(req: PhoenixRequest, include_greeks: bool = True, include_stress: bool = True, include_heatmap: bool = True):
+    Vega is per 1% of volatility, theta per calendar day, rho per 1% of rate --
+    the scalings a trader reads, not the raw partial derivatives.
+    """
     try:
-        spec = build_spec(req)
-        result = price_phoenix_autocall(spec)
-        if include_greeks:
-            result["greeks"] = finite_difference_greeks(spec)
-        if include_stress:
-            result["stress"] = run_stress_scenarios(spec)
-        if include_heatmap:
-            result["heatmap"] = spot_vol_heatmap(spec)
-        result["validation"] = validate_phoenix_spec(spec)
-        result["issuer_price_pct"] = result["fair_value_pct"] + 0.75
-        result["client_price_pct"] = result["fair_value_pct"] + 1.25
-        result["bid_ask_pct"] = {"bid": result["fair_value_pct"] - 0.35, "ask": result["fair_value_pct"] + 0.35}
-        init_db()
-        insert_pricing_run("phoenix_autocall", model_to_dict(req), result)
-        return result
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        px = price(req.spot, req.strike, req.maturity, req.rate, req.vol,
+                   req.option, req.dividend_yield)
+        g = greeks(req.spot, req.strike, req.maturity, req.rate, req.vol,
+                   req.dividend_yield)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    is_call = req.option == "call"
+    return PriceResponse(
+        price=px,
+        delta=g["delta_call"] if is_call else g["delta_put"],
+        gamma=g["gamma"],
+        vega=g["vega"],
+        theta=g["theta_call"] if is_call else g["theta_put"],
+        rho=g["rho_call"] if is_call else g["rho_put"],
+    )

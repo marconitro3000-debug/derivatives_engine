@@ -1,1 +1,1 @@
-"""FastAPI application for the derivatives engine."""
+"""api — FastAPI service around the neural volatility surface."""

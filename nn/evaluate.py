@@ -205,8 +205,8 @@ def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None):
                            shading="auto")
         ax.contour(kk, TT, field, levels=[0.0], colors="black", linewidths=1.2)
         ax.scatter(snapshot.k, snapshot.T, s=4, c="black", alpha=0.35)
-        flag = (f"{n_bad} violations, worst {worst:.2e}" if n_bad
-                else "no violations")
+        flag = ("no violations" if not n_bad else
+                f"{n_bad} violation{'s' if n_bad > 1 else ''}, worst {worst:.2e}")
         ax.set_title(f"{title}   ({flag})", fontsize=10)
         ax.set_xlabel("log-moneyness k")
         ax.set_ylabel("maturity T (years)")

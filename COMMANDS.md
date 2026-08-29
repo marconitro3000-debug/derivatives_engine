@@ -316,3 +316,15 @@ scripts/
 tests/             381 tests across 13 test files
 derivatives_engine.ipynb   62-cell theory + examples notebook
 ```
+# Phoenix Workbench Commands
+
+```bash
+pip install -e ".[dev]"
+python scripts/init_db.py
+python scripts/ingest_market.py AAPL --source yfinance --period 2y
+python scripts/ingest_crypto.py bitcoin ethereum
+python scripts/price_autocall.py examples/phoenix_autocall_aapl.json --paths 50000
+python scripts/run_api.py
+```
+
+Open `apps/workbench/index.html` and point the API field to `http://localhost:8000`.

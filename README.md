@@ -25,6 +25,12 @@ python main.py          # or just press Run
 No server, no flags, no arguments. Settings live in [`config.py`](config.py);
 output lands in `results/`.
 
+📓 **[`notebook.ipynb`](notebook.ipynb)** — the same study written as a paper,
+every claim backed by a runnable cell, committed with its outputs so it renders
+in full on GitHub.
+📘 **[`docs/USAGE.md`](docs/USAGE.md)** — commands, the Jupyter workflow, the
+full API, every config knob, troubleshooting.
+
 ---
 
 ## Result
@@ -178,6 +184,7 @@ first.
 ```
 main.py                    the study, start to finish — press Run
 config.py                  every knob, one file
+notebook.ipynb             the same study as a paper, with outputs
 volsurface/
     chain.py               option chain -> clean (k, T, IV) cloud
     american.py            binomial tree; de-Americanisation
@@ -199,6 +206,8 @@ tests/                     72 tests, no network required
 ```
 
 ## Using it as a library
+
+Full reference in [`docs/USAGE.md`](docs/USAGE.md).
 
 ```python
 from volsurface import fetch_chain, train_surface, compare, comparison_table

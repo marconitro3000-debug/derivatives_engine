@@ -56,11 +56,12 @@ class HestonParams:
 
 # ── characteristic function ───────────────────────────────────────────────────
 
-def _char_func(u: complex, S: float, T: float, r: float,
+def _char_func(u: complex, S: float, T: float, r: float, q: float,
                p: HestonParams) -> complex:
     """
     Heston characteristic function (the "little Heston trap" formulation of
-    Albrecher et al., which is numerically stable).
+    Albrecher et al., which is numerically stable). `q` is the continuous
+    dividend yield — the risk-neutral drift is (r - q).
     """
     x0 = np.log(S)
     kappa, theta, xi, rho, v0 = p.kappa, p.theta, p.xi, p.rho, p.v0
@@ -69,7 +70,7 @@ def _char_func(u: complex, S: float, T: float, r: float,
     g = (kappa - rho * xi * 1j * u - d) / (kappa - rho * xi * 1j * u + d)
 
     exp_dt = np.exp(-d * T)
-    C = (r * 1j * u * T
+    C = ((r - q) * 1j * u * T
          + (kappa * theta / xi ** 2)
          * ((kappa - rho * xi * 1j * u - d) * T
             - 2 * np.log((1 - g * exp_dt) / (1 - g))))
@@ -81,25 +82,29 @@ def _char_func(u: complex, S: float, T: float, r: float,
 # ── pricing via Gil-Pelaez / Lewis integration ────────────────────────────────
 
 def price(S: float, K: float, T: float, r: float,
-          p: HestonParams, option: str = "call") -> float:
+          p: HestonParams, option: str = "call", q: float = 0.0) -> float:
     """
     European option price under Heston via the two-integral Gil-Pelaez formula.
+    `q` is the continuous dividend yield (default 0 — preserves prior behavior
+    for callers that don't pass it).
     """
     def integrand(u, num):
         if num == 1:
-            cf = _char_func(u - 1j, S, T, r, p) / _char_func(-1j, S, T, r, p)
+            cf = _char_func(u - 1j, S, T, r, q, p) / _char_func(-1j, S, T, r, q, p)
         else:
-            cf = _char_func(u, S, T, r, p)
+            cf = _char_func(u, S, T, r, q, p)
         return np.real(np.exp(-1j * u * np.log(K)) * cf / (1j * u))
 
     P1 = 0.5 + (1 / np.pi) * quad(lambda u: integrand(u, 1), 1e-8, 200, limit=200)[0]
     P2 = 0.5 + (1 / np.pi) * quad(lambda u: integrand(u, 2), 1e-8, 200, limit=200)[0]
 
-    call = S * P1 - K * np.exp(-r * T) * P2
+    disc_q = np.exp(-q * T)
+    disc_r = np.exp(-r * T)
+    call = S * disc_q * P1 - K * disc_r * P2
     if option == "call":
         return float(max(call, 0.0))
     elif option == "put":
-        return float(max(call - S + K * np.exp(-r * T), 0.0))
+        return float(max(call - S * disc_q + K * disc_r, 0.0))
     else:
         raise ValueError("option must be 'call' or 'put'.")
 

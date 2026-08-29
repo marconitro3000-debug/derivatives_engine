@@ -68,6 +68,21 @@ class DiscountCurve:
             raise ValueError("times and zero_rates must have equal length.")
         return cls(t, np.exp(-z * t), name=name)
 
+    _TENOR_YEARS = {"1M": 1 / 12, "3M": 3 / 12, "6M": 0.5, "1Y": 1.0, "2Y": 2.0, "5Y": 5.0, "10Y": 10.0, "30Y": 30.0}
+
+    @classmethod
+    def from_tenor_dict(cls, tenors: dict[str, float], name: str = "tenor_curve") -> "DiscountCurve":
+        """Build a curve from a `{tenor_label: zero_rate}` dict (e.g. FRED Treasury
+        points). Treats each rate as a continuously-compounded zero rate at the
+        tenor's year-fraction — an approximation of the CMT bond-equivalent yields
+        FRED actually reports, acceptable for a research-prototype discount curve."""
+        known = {k: v for k, v in tenors.items() if k in cls._TENOR_YEARS}
+        if not known:
+            raise ValueError(f"no recognized tenors in {list(tenors)}")
+        times = [cls._TENOR_YEARS[k] for k in known]
+        rates = [known[k] for k in known]
+        return cls.from_zero_rates(times, rates, name=name)
+
     def discount_factor(self, maturity: float | np.ndarray) -> float | np.ndarray:
         scalar = np.ndim(maturity) == 0
         m = np.atleast_1d(np.asarray(maturity, dtype=float))

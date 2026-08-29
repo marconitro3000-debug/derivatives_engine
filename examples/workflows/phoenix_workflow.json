@@ -1,0 +1,47 @@
+{
+  "name": "Phoenix Autocall AAPL Workflow",
+  "product_type": "phoenix_autocall",
+  "objective": {
+    "goal": "enhanced_yield",
+    "risk_tolerance": "moderate",
+    "target_coupon": "8.00% p.a.",
+    "protection": "70% capital barrier"
+  },
+  "nodes": [
+    {"id": "trigger", "type": "manual_trigger"},
+    {"id": "underlying", "type": "underlying", "params": {"ticker": "AAPL"}},
+    {"id": "vol", "type": "volatility_model", "params": {"model": "manual_or_garch", "volatility": 0.28}},
+    {"id": "rates", "type": "rates_curve", "params": {"rate": 0.045}},
+    {"id": "barrier", "type": "barrier", "params": {"level": 0.70}},
+    {"id": "coupon", "type": "coupon", "params": {"coupon_pa": 0.08}},
+    {"id": "memory", "type": "memory", "params": {"enabled": true}},
+    {"id": "autocall", "type": "autocall", "params": {"level": 1.00, "frequency": "quarterly"}},
+    {"id": "pricing", "type": "pricing_output"}
+  ],
+  "edges": [
+    ["trigger", "underlying"],
+    ["underlying", "vol"],
+    ["underlying", "barrier"],
+    ["rates", "pricing"],
+    ["vol", "pricing"],
+    ["barrier", "coupon"],
+    ["coupon", "memory"],
+    ["memory", "autocall"],
+    ["autocall", "pricing"]
+  ],
+  "product_spec": {
+    "underlying": "AAPL",
+    "spot": 175.43,
+    "notional": 1000000,
+    "maturity_years": 1.0,
+    "coupon_pa": 0.08,
+    "coupon_frequency": 4,
+    "coupon_barrier": 0.70,
+    "capital_barrier": 0.70,
+    "autocall_level": 1.00,
+    "risk_free_rate": 0.045,
+    "volatility": 0.28,
+    "n_paths": 50000,
+    "memory": true
+  }
+}

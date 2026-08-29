@@ -5,14 +5,14 @@ build-backend = "setuptools.backends.legacy:build"
 [project]
 name = "derivatives-engine"
 version = "1.0.0"
-description = "Derivatives pricing & volatility calibration engine"
+description = "Modular derivatives pricing engine with a visual structured-products workbench"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Marco"}
 ]
-keywords = ["quantitative finance", "derivatives pricing", "options", "forwards", "futures", "volatility", "heston", "black-scholes"]
+keywords = ["quantitative finance", "derivatives pricing", "structured products", "phoenix autocall", "fastapi", "market data"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -24,12 +24,17 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "matplotlib>=3.7",
+    "pandas>=2.0",
+    "requests>=2.31",
     "yfinance>=0.2",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "httpx>=0.26",
 ]
 
 [tool.setuptools.packages.find]
@@ -44,6 +49,11 @@ include = [
     "volatility*",
     "exotics*",
     "structured*",
+    "api*",
+    "data*",
+    "db*",
+    "arbitrage*",
+    "ml*",
 ]
 
 [tool.pytest.ini_options]

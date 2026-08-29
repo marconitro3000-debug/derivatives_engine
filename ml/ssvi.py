@@ -197,46 +197,56 @@ def calibrate_ssvi(log_moneyness_list: list[np.ndarray],
 def ssvi_local_vol(params: SSVIParams, k: float, T: float,
                     theta_fn, dtheta_fn=None) -> float:
     """
-    Dupire local vol² from SSVI total variance surface.
+    Dupire local vol² from SSVI total variance surface (Gatheral 2006, Eq. 1.4).
 
-    σ²_loc(k, T) = ∂w/∂T / [1 - (k/w)∂w/∂k + (1/4)(-1/4 - 1/w + k²/w²)(∂w/∂k)²
-                              + (1/2)∂²w/∂k²]
+    σ²_local(k,T) = ∂w/∂T / g(k,T)
 
-    where θ = θ(T) is the ATM total variance as a function of time.
-    Requires θ'(T) = dθ/dT.
+    where g = (1 − k·∂w_k/(2w))² − (∂w_k)²·(¼ + 1/w)/4 + ∂²w_k/2
+
+    ∂w/∂T is computed exactly via the chain rule ∂w/∂T = (∂w/∂θ)·(dθ/dT):
+
+        ∂φ/∂θ = −φ·[γ/θ + (1−γ)/(1+θ)]
+        ∂w/∂θ = w/θ + (θ/2)·k·(∂φ/∂θ)·[ρ + (φk+ρ)/D]
+        D      = √[(φk+ρ)² + 1−ρ²]
+
+    Strike-axis derivatives (∂w_k, ∂²w_k) are analytical SSVI closed forms.
 
     Parameters
     ----------
-    theta_fn  : callable T → θ(T)   (e.g. spline interpolator)
-    dtheta_fn : callable T → dθ/dT  (optional; uses finite diff if None)
+    theta_fn  : callable T → θ(T)  (e.g. CubicSpline interpolator)
+    dtheta_fn : callable T → dθ/dT (optional; finite-differences if None)
     """
     h_T = 1e-4
     if dtheta_fn is None:
         dtheta = (theta_fn(T + h_T) - theta_fn(T - h_T)) / (2 * h_T)
     else:
-        dtheta = dtheta_fn(T)
+        dtheta = float(dtheta_fn(T))
 
-    theta = theta_fn(T)
+    theta = float(theta_fn(T))
+    phi   = params.phi(theta)
+    rho   = params.rho
+    gamma = params.gamma
 
-    h_k = 1e-4
-    w0  = params.total_var(np.array([k]),         theta)[0]
-    wk1 = params.total_var(np.array([k + h_k]),   theta)[0]
-    wk2 = params.total_var(np.array([k - h_k]),   theta)[0]
+    k_arr = np.array([k])
+    D     = float(np.sqrt((phi * k + rho) ** 2 + 1.0 - rho ** 2))
+    w0    = float(params.total_var(k_arr, theta)[0])
 
-    dw_dk  = (wk1 - wk2) / (2 * h_k)
-    d2w_dk = (wk1 - 2*w0 + wk2) / h_k**2
+    # ── analytical strike-axis derivatives ────────────────────────────────────
+    dw_dk  = float((theta * phi / 2.0) * (rho + (phi * k + rho) / D))
+    d2w_dk = float((theta * phi ** 2 / 2.0) * (1.0 - rho ** 2) / D ** 3)
 
-    # ∂w/∂T via chain rule: ∂w/∂T = (∂w/∂θ) × (dθ/dT)
-    phi     = params.phi(theta)
-    w_theta = (w0 / theta) if theta > 1e-10 else 0.0   # approx: w ∝ θ
-    dw_dT   = w_theta * dtheta
+    # ── exact ∂w/∂T via chain rule ────────────────────────────────────────────
+    dphi_dtheta = -phi * (gamma / theta + (1.0 - gamma) / (1.0 + theta))
+    dw_dtheta   = w0 / theta + (theta / 2.0) * k * dphi_dtheta * (rho + (phi * k + rho) / D)
+    dw_dT       = dw_dtheta * dtheta
 
-    denom = (1
-             - (k / w0) * dw_dk
-             + 0.25 * (-0.25 - 1/w0 + k**2/w0**2) * dw_dk**2
-             + 0.5 * d2w_dk)
+    # ── Dupire denominator g(k,T) ─────────────────────────────────────────────
+    w0_safe = max(w0, 1e-12)
+    denom   = ((1.0 - k * dw_dk / (2.0 * w0_safe)) ** 2
+               - dw_dk ** 2 * (0.25 + 1.0 / w0_safe) / 4.0
+               + d2w_dk / 2.0)
 
-    if denom <= 0 or dw_dT < 0:
+    if denom <= 1e-10 or dw_dT < 0:
         return np.nan
 
     return float(dw_dT / denom)

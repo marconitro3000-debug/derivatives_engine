@@ -42,3 +42,6 @@ _test_output.png
 # Distribution
 *.tar.gz
 *.whl
+
+# Logs
+*.log

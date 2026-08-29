@@ -158,21 +158,22 @@ class PricingEngine:
         return float(np.sqrt(max(w, 1e-12) / T))
 
     def price_option(self, ticker: str, K: float, T: float,
-                     option: str = "call", spot: float = None) -> float:
+                     option: str = "call", spot: float = None, q: float = 0.0) -> float:
         """
         Price an option from the live calibrated model.
 
         Heston prices directly via its characteristic function.
         SVI produces an IV which is then fed into Black-Scholes.
+        `q` is the continuous dividend yield (default 0).
         """
         params, spot = self._get_params_and_spot(ticker, spot)
 
         if self.model == "heston":
             p = heston_mod.HestonParams.from_dict(params)
-            return heston_mod.price(spot, K, T, self.r, p, option)
+            return heston_mod.price(spot, K, T, self.r, p, option, q)
         else:
             iv = self.implied_vol(ticker, K, T, spot)
-            return bs_price(spot, K, T, self.r, iv, option)
+            return bs_price(spot, K, T, self.r, iv, option, q)
 
     # ── diagnostics ───────────────────────────────────────────────────────────
 

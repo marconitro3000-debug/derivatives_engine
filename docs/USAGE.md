@@ -42,7 +42,21 @@ pip install jupyter
 python main.py
 ```
 
-That is the whole interface. No arguments, no flags, no server. It:
+No arguments, no flags, no server. It asks what to do:
+
+```
+  [1]  Train a surface        fit a chain, score it, plot everything
+  [2]  Price off a surface    query the one trained last time
+  [3]  Compare trained models which archived run to use, and why
+```
+
+**In an editor**, press Run on `main.py`. A VS Code launch configuration is
+committed at `.vscode/launch.json`. Set `mode` in `config.py` to `"train"`,
+`"price"` or `"compare"` to skip the menu — useful for a scheduled run, where
+nothing is there to answer a prompt anyway (`main.py` detects a non-interactive
+process automatically and defaults to `"train"` in that case).
+
+### [1] Train
 
 1. downloads and cleans a live option chain (falling back to a generated one,
    loudly, if the network is unavailable)
@@ -50,23 +64,77 @@ That is the whole interface. No arguments, no flags, no server. It:
 3. calibrates per-slice SVI and joint SSVI
 4. trains the neural surface
 5. scores all three on fit **and** on static arbitrage
-6. writes everything to `results/`
+6. writes the report and figures to `results/`, and **archives** the run to
+   `models/<ticker>_<timestamp>/`
 
-**In an editor**, press Run on `main.py`. A VS Code launch configuration is
-committed at `.vscode/launch.json`.
+Two output locations, on purpose:
 
-### What lands in `results/`
+| directory | what it is | overwritten? |
+|---|---|---|
+| `results/` | the *cursor* — whatever mode [2] reads to price | yes, every train run |
+| `models/<ticker>_<timestamp>/` | the *archive* — one folder per run | never |
+
+`results/` files:
 
 | file | contents |
 |---|---|
 | `report.txt` | the full run, identical to what was printed |
+| `training.png` | fit, generalisation gap, constraint and penalty curves — see below |
 | `smiles.png` | market smiles per expiry with every surface overlaid |
-| `arbitrage_neural.png` | Durrleman `g` and `dw/dT` maps for the neural surface |
-| `arbitrage_svi.png` | the same maps for per-slice SVI |
-| `arbitrage_ssvi.png` | the same maps for joint SSVI |
-| `<ticker>_surface.pt` | the trained model plus its calibrated SSVI prior |
+| `arbitrage_neural.png` / `_svi.png` / `_ssvi.png` | Durrleman `g` and `dw/dT` maps, one per surface |
+| `<ticker>_surface.pt`, `<ticker>_chain.npz` | the model and the chain it was fitted to — both needed to price |
+| `model_comparison.png` | written by mode [3], if run |
 
-`results/` is git-ignored. Copy anything you want to keep.
+`models/<ticker>_<timestamp>/` holds the same `surface.pt` / `chain.npz` plus
+`history.npz` (the full per-epoch training history) and `metrics.json` (the
+numbers `runs_table` reads). Both directories are git-ignored — copy out
+whatever you want to keep.
+
+#### Reading `training.png`
+
+Four panels, in the order you should read them:
+
+1. **Fit error** — train and validation IV RMSE, with the epoch actually
+   selected marked. Validation sitting *below* training here is normal, not a
+   bug: the held-out points are interior strikes of a smile that is already
+   heavily constrained by its neighbours, and the vega weighting defining the
+   error is renormalised separately within each split.
+2. **Generalisation gap** — `val − train`, filled. Flat and small says the fit
+   will hold up on a chain it has not seen; widening over epochs is the
+   network starting to fit the training strikes at the validation strikes'
+   expense, and it is exactly why validation error (not training error)
+   chooses the marked epoch.
+3. **Worst violation on collocation points** — the smallest `dw/dT` and
+   Durrleman `g` found that epoch. Should cross into positive territory during
+   the penalty warm-up and stay there. Hovering at zero means the constraints
+   are actively fighting the fit; deeply positive throughout means they were
+   never binding in the first place.
+4. **Penalty terms**, log scale — a working run drives both to numerical zero.
+
+### [2] Price
+
+Loads `<ticker>_surface.pt` and `<ticker>_chain.npz` from `results/` and asks
+for a maturity and a strike (or several, space-separated; blank strike gives a
+ladder around the forward). For each one it prints implied vol, call and put
+price, delta/vega/gamma/theta, and the two no-arbitrage quantities `dw/dT` and
+Durrleman `g` evaluated at exactly that point — plus, if you're at a terminal
+that can show a window, the smile with your strike marked on it so you can see
+at a glance whether the answer came from interpolating real quotes or from
+extrapolating past them.
+
+Querying past twice the longest fitted expiry prints a warning: the answer
+still degrades gracefully to the SSVI prior rather than to noise, but it is not
+information the market gave you.
+
+### [3] Compare
+
+Lists every archived run for the configured ticker, ranked by validation error,
+with the generalisation gap and the per-slice-SVI / joint-SSVI numbers on that
+same chain alongside each one — the question this answers is "which of these
+checkpoints should mode [2] actually use", after which you copy that run's
+`surface.pt` / `chain.npz` into `results/` under the names mode [2] expects.
+Optionally plots a bar-chart comparison (`model_comparison.png`) and, on
+request, an overlay of the validation curves for up to six runs.
 
 ### Typical runtime
 
@@ -76,10 +144,11 @@ committed at `.vscode/launch.json`.
 | SVI + SSVI calibration | ~60 s |
 | neural training, 1,500 epochs | ~90 s |
 | figures | ~15 s |
-| **total** | **~3 min** |
+| **total (train)** | **~3 min** |
+| price / compare | instant — no network, no training |
 
 To iterate faster set `epochs = 400` and `run_baselines = False` in
-`config.py` — that gets a run under 30 seconds.
+`config.py` — that gets a train run under 30 seconds.
 
 ---
 
@@ -140,6 +209,13 @@ Every setting lives in [`config.py`](../config.py) as one dataclass. Edit it and
 re-run; there is no CLI, on purpose — a run should be reproducible by reading one
 file rather than by remembering which flags were passed.
 
+### What to do
+
+| setting | default | meaning |
+|---|---|---|
+| `mode` | `"ask"` | `"ask"` shows the menu. `"train"` / `"price"` / `"compare"` skip straight to it. Falls back to `"train"` automatically when nothing is listening for input (a scheduled run). |
+| `show_plots` | `True` | pop figures up in a window as well as saving them, when there is a human at the keyboard. Always off in a non-interactive run. |
+
 ### What to fit
 
 | setting | default | meaning |
@@ -186,11 +262,23 @@ the fit where no violation is at stake.
 
 | setting | default | meaning |
 |---|---|---|
-| `output_dir` | `Path("results")` | |
-| `make_plots` | `True` | |
-| `save_model` | `True` | |
+| `output_dir` | `Path("results")` | the *cursor* — overwritten every train run; what mode [2] prices from. |
+| `models_dir` | `Path("models")` | the *archive* — every train run gets its own `<ticker>_<timestamp>/` folder here, never overwritten; what mode [3] compares. |
+| `make_plots` | `True` | writes `training.png`, `smiles.png`, one `arbitrage_*.png` per surface. |
+| `save_model` | `True` | also controls whether the run is archived to `models_dir`. |
 | `run_baselines` | `True` | SVI calibration is the slowest step; it is also the point of the comparison. |
 | `verbose` | `True` | print the training log. |
+
+### Pricing (mode `"price"`, non-interactive only)
+
+Only read when `main.py` runs with nothing attached to stdin (a scheduled job).
+In an interactive session these are just the first prompt's defaults — you
+answer the prompts instead.
+
+| setting | default | meaning |
+|---|---|---|
+| `price_maturities` | `(0.25, 0.5, 1.0)` | one price table per maturity, in years. |
+| `price_strikes` | `()` | empty means a ladder around the forward at each maturity. |
 
 ---
 
@@ -226,7 +314,11 @@ chain = vs.synthetic_snapshot(ticker="TEST", noise_bps=25.0, seed=0)
 chain.summary()
 chain.early_exercise_summary()
 chain.slice_at(chain.maturities[0])       # single-expiry sub-chain
+chain.forward_at(0.75)                    # (F, DF) interpolated between expiries
 len(chain)
+
+chain.save("spy_chain.npz")
+chain2 = vs.ChainSnapshot.load("spy_chain.npz")
 ```
 
 Build from your own data instead of Yahoo:
@@ -301,7 +393,30 @@ print(vs.comparison_table(scores))
 vs.plot_fit(chain, [neural, svi, ssvi])          # returns a figure
 vs.plot_fit(chain, [neural], "smiles.png")       # or writes a file
 vs.plot_arbitrage_map(surface, chain)
+vs.plot_training(result)                          # fit / gap / violations / penalties
+vs.plot_quote(surface, chain, strike=450, T=0.5)  # smile with one strike marked
+vs.plot_model_comparison(records)                 # bar chart across archived runs
 ```
+
+### The model registry
+
+Every `main.py` train run archives itself; this is the same mechanism from
+code, useful for a sweep over hyperparameters you want to compare afterwards.
+
+```python
+record = vs.save_run("models", cfg, chain, result, vs.compare(chain, result))
+# record.val_rmse_bps, record.generalization_gap_bps, record.dir, ...
+
+records = vs.list_runs("models", ticker="SPY")   # newest first
+print(vs.runs_table(records))                     # ranked by validation error
+
+best = min(records, key=lambda r: r.val_rmse_bps)
+model, chain = vs.load_run(best)
+history = vs.load_history(best)                    # the full per-epoch dict
+```
+
+`cfg` only needs `.ticker` and `.seed` attributes — any small object with those
+works, not just `config.RunConfig`.
 
 ### Pricing primitives
 

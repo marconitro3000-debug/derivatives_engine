@@ -13,7 +13,9 @@ env/
 
 # Run output
 results/
+models/
 *.pt
+*.npz
 
 # Editors / OS
 .vscode/*

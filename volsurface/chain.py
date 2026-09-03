@@ -129,6 +129,58 @@ class ChainSnapshot:
     def __len__(self) -> int:
         return len(self.k)
 
+    # -- persistence ----------------------------------------------------------
+
+    def save(self, path) -> None:
+        """Write the cleaned chain to a ``.npz`` archive.
+
+        A fitted surface is useless on its own: pricing a strike needs the
+        forward and discount factor of its expiry, and those were *fitted* from
+        this chain's own quotes. Saving the model without the chain would force
+        a re-download to price anything, and the re-download would return a
+        different market.
+        """
+        np.savez_compressed(
+            path,
+            ticker=self.ticker, asof=str(self.asof), spot=self.spot,
+            k=self.k, T=self.T, iv=self.iv, iv_european=self.iv_european,
+            weight=self.weight, strike=self.strike, is_call=self.is_call,
+            mid=self.mid, mid_european=self.mid_european, spread=self.spread,
+            vega=self.vega,
+            forward_T=np.array(sorted(self.forwards)),
+            forward_F=np.array([self.forwards[t] for t in sorted(self.forwards)]),
+            discount_DF=np.array([self.discounts[t] for t in sorted(self.discounts)]),
+        )
+
+    @classmethod
+    def load(cls, path) -> "ChainSnapshot":
+        """Read back a chain written by `save`."""
+        z = np.load(path, allow_pickle=False)
+        Ts = z["forward_T"]
+        return cls(
+            ticker=str(z["ticker"]),
+            asof=datetime.strptime(str(z["asof"]), "%Y-%m-%d").date(),
+            spot=float(z["spot"]),
+            k=z["k"], T=z["T"], iv=z["iv"], iv_european=z["iv_european"],
+            weight=z["weight"], strike=z["strike"], is_call=z["is_call"],
+            mid=z["mid"], mid_european=z["mid_european"], spread=z["spread"],
+            vega=z["vega"],
+            forwards={float(t): float(f) for t, f in zip(Ts, z["forward_F"])},
+            discounts={float(t): float(d) for t, d in zip(Ts, z["discount_DF"])},
+        )
+
+    def forward_at(self, T: float) -> tuple[float, float]:
+        """``(forward, discount)`` at any maturity, interpolated between expiries.
+
+        Linear in ``T`` rather than in anything cleverer: between two listed
+        expiries the forward is pinned at both ends by the market itself, and a
+        smoother scheme would only add a shape nothing observed.
+        """
+        Ts = self.maturities
+        F = float(np.interp(T, Ts, [self.forwards[t] for t in Ts]))
+        DF = float(np.interp(T, Ts, [self.discounts[t] for t in Ts]))
+        return F, DF
+
     def summary(self) -> str:
         return (
             f"{self.ticker} @ {self.asof}  spot={self.spot:.2f}\n"

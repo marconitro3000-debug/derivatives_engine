@@ -36,6 +36,7 @@ Module map
     svi           raw SVI and joint SSVI baselines
     neural        the network: prior, model, penalties, training
     report        scorecards and figures
+    registry      archive of trained runs, for comparing which model to use
     american      binomial tree, and the de-Americanisation it makes possible
     montecarlo    independent numerical check on the analytic formula
 """
@@ -59,7 +60,17 @@ from .neural import (
     TrainResult,
     train_surface,
 )
-from .report import compare, comparison_table, evaluate_surface, plot_arbitrage_map, plot_fit
+from .report import (
+    compare,
+    comparison_table,
+    evaluate_surface,
+    plot_arbitrage_map,
+    plot_fit,
+    plot_model_comparison,
+    plot_quote,
+    plot_training,
+)
+from .registry import RunRecord, list_runs, load_history, load_run, runs_table, save_run
 from .surface import VolSurface
 from .svi import SSVIParams, SSVISurface, SVIParams, SVISliceSurface
 
@@ -79,5 +90,8 @@ __all__ = [
     "TrainConfig", "TrainResult", "PenaltyWeights", "train_surface",
     # scoring
     "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage",
-    "evaluate_surface", "compare", "comparison_table", "plot_fit", "plot_arbitrage_map",
+    "evaluate_surface", "compare", "comparison_table",
+    "plot_fit", "plot_arbitrage_map", "plot_training", "plot_quote", "plot_model_comparison",
+    # registry
+    "RunRecord", "save_run", "list_runs", "load_run", "load_history", "runs_table",
 ]

@@ -33,6 +33,11 @@ No server, no flags, no arguments. `main.py` asks what you want to do:
                               (instant, no network)
 ```
 
+Then which underlying — **Train** takes any symbol typed on the spot, fetched
+live on the fly; **Price** and **Compare** show what has actually been trained
+(`available: SPY, AAPL, QQQ`) and let you pick, rather than making you remember
+a ticker from three runs ago.
+
 **Train** writes the report, the training curves and the arbitrage maps to
 `results/`, and archives the model, the chain and the full training history
 under `models/<ticker>_<timestamp>/` — every run kept, nothing overwritten.
@@ -43,8 +48,8 @@ validation error and generalisation gap, so after a few experiments there is an
 answer to "which checkpoint do I actually use" instead of a folder of
 `.pt` files to guess between.
 
-Settings live in [`config.py`](config.py); set `mode = "train"` there to skip
-the menu for a scheduled run.
+Settings live in [`config.py`](config.py); set `mode = "train"` and `ticker`
+there to skip both prompts for a scheduled run.
 
 📓 **[`notebook.ipynb`](notebook.ipynb)** — the same study written as a paper,
 every claim backed by a runnable cell, committed with its outputs so it renders

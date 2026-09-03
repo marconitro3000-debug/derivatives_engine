@@ -50,11 +50,25 @@ No arguments, no flags, no server. It asks what to do:
   [3]  Compare trained models which archived run to use, and why
 ```
 
+Then which underlying:
+
+* **Train** accepts any symbol, typed on the spot — it does not need to exist
+  in `config.py` at all. Blank keeps whatever `ticker` is set to there.
+* **Price** and **Compare** show what has actually been trained (scanned from
+  `models/` and `results/`) and let you pick one, rather than asking you to
+  remember a ticker you typed three runs ago:
+
+  ```
+    available: SPY, AAPL, QQQ
+    ticker [SPY]:
+  ```
+
 **In an editor**, press Run on `main.py`. A VS Code launch configuration is
 committed at `.vscode/launch.json`. Set `mode` in `config.py` to `"train"`,
-`"price"` or `"compare"` to skip the menu — useful for a scheduled run, where
-nothing is there to answer a prompt anyway (`main.py` detects a non-interactive
-process automatically and defaults to `"train"` in that case).
+`"price"` or `"compare"` to skip the menu, and `ticker` to skip that prompt too
+— useful for a scheduled run, where nothing is there to answer a prompt anyway
+(`main.py` detects a non-interactive process automatically, defaults to
+`"train"`, and uses `config.ticker` without asking).
 
 ### [1] Train
 

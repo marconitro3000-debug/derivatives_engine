@@ -154,6 +154,62 @@ def choose_mode(cfg: RunConfig) -> str:
     }.get(choice.lower(), "train")
 
 
+def known_tickers(cfg: RunConfig) -> list[str]:
+    """Every ticker with something archived, newest activity first.
+
+    Scanned from `models/` (every past train run) union whatever `results/`
+    currently points at, so the prompt below can show "here is what you have"
+    instead of asking the ticker to be typed from memory.
+    """
+    seen: list[str] = []
+    if cfg.models_dir.exists():
+        for run_dir in sorted(cfg.models_dir.iterdir(),
+                              key=lambda p: p.stat().st_mtime, reverse=True):
+            meta = run_dir / "metrics.json"
+            if not meta.exists():
+                continue
+            try:
+                import json
+                t = json.loads(meta.read_text(encoding="utf-8"))["ticker"]
+            except (OSError, ValueError, KeyError):
+                continue
+            if t not in seen:
+                seen.append(t)
+    if cfg.output_dir.exists():
+        for p in cfg.output_dir.glob("*_surface.pt"):
+            t = p.stem.removesuffix("_surface").upper()
+            if t not in seen:
+                seen.append(t)
+    return seen
+
+
+def choose_ticker(cfg: RunConfig, mode: str) -> str:
+    """Ask which underlying to work with. `config.ticker` is only the default.
+
+    Training accepts any symbol -- it will be fetched live. Pricing and
+    comparing only make sense for a ticker that has already been trained, so
+    those two show what is actually on disk rather than let a typo lead
+    straight to "no trained surface found".
+    """
+    if not interactive():
+        return cfg.ticker
+
+    print()
+    if mode == "train":
+        raw = ask(f"  ticker to fit [{cfg.ticker}] (any symbol -- fetched live): ")
+        return raw.upper() if raw else cfg.ticker
+
+    available = known_tickers(cfg)
+    if not available:
+        print(f"  no trained surfaces on disk yet -- train one first (mode [1]).")
+        return cfg.ticker
+
+    default = cfg.ticker if cfg.ticker in available else available[0]
+    print(f"  available: {', '.join(available)}")
+    raw = ask(f"  ticker [{default}]: ")
+    return (raw.upper() if raw else default)
+
+
 # ── shared steps ─────────────────────────────────────────────────────────────
 
 def load_chain(cfg: RunConfig, say):
@@ -533,6 +589,7 @@ def run_price(cfg: RunConfig) -> int:
 
 def main(cfg: RunConfig = CONFIG) -> int:
     mode = choose_mode(cfg)
+    cfg.ticker = choose_ticker(cfg, mode)
 
     # Pick the backend once, before anything imports pyplot: an interactive run
     # wants windows, a scripted one must not block waiting for someone to close

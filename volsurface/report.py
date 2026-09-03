@@ -112,16 +112,13 @@ def compare(snapshot, result, include_baselines: bool = True) -> list[SurfaceSco
 # -- plots --------------------------------------------------------------------
 
 def plot_fit(snapshot, surfaces: list[VolSurface], path: str | None = None,
-             max_slices: int = 6):
+             max_slices: int = 6, show: bool = False):
     """Market smiles with each surface overlaid, one panel per expiry.
 
     The model curves are drawn over a *wider* strike range than the quotes so
     the wings -- where the surfaces disagree and where arbitrage appears -- are
     visible rather than cropped out.
     """
-    import matplotlib
-    if path:
-        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     maturities = snapshot.maturities
@@ -157,23 +154,17 @@ def plot_fit(snapshot, surfaces: list[VolSurface], path: str | None = None,
                  f"(shaded = outside quoted strikes)", fontsize=11)
     fig.tight_layout()
 
-    if path:
-        fig.savefig(path, dpi=130)
-        plt.close(fig)
-        return path
-    return fig
+    return _finish(fig, path, show)
 
 
-def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None):
+def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None,
+                       show: bool = False):
     """Heat map of Durrleman's ``g`` and of ``dw/dT`` over the (k, T) plane.
 
     Negative regions are the arbitrage; the quoted points are overlaid so it is
     immediately clear whether the violations sit inside the data or out in the
     extrapolated wings, which is a completely different severity of problem.
     """
-    import matplotlib
-    if path:
-        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     from volsurface.diagnostics import butterfly_g
@@ -215,8 +206,185 @@ def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None):
     fig.suptitle(f"{surface.name} — static arbitrage map", fontsize=11)
     fig.tight_layout()
 
+    return _finish(fig, path, show)
+
+
+def _finish(fig, path, show):
+    """Save, display, or hand back the figure -- in whatever combination is wanted.
+
+    A run that both writes a report and is being watched wants the figure on
+    screen *and* on disk, so these are independent rather than an either/or.
+    """
+    import matplotlib.pyplot as plt
+
     if path:
-        fig.savefig(path, dpi=130)
+        fig.savefig(path, dpi=130, bbox_inches="tight")
+    if show:
+        plt.show()
+    elif path:
         plt.close(fig)
-        return path
-    return fig
+    return path if (path and not show) else fig
+
+
+def plot_training(result, path: str | None = None, show: bool = False):
+    """The four curves that say whether a run worked and will hold up.
+
+    **Fit** -- training and validation IV error, with the selected epoch marked.
+    Validation below training here is normal, not a bug: the held-out strikes
+    are interior points of each smile, and the vega weighting that defines the
+    error is renormalised per split.
+
+    **Generalisation gap** -- ``val - train`` explicitly, filled, because a gap
+    that is small and flat is a different story from one that starts small and
+    widens. The second shape is the model starting to fit the training strikes
+    at the validation strikes' expense -- overfitting -- which is why validation
+    error, not training error, selects the epoch (the dotted line): the selected
+    epoch is where this gap is not yet a problem.
+
+    **Worst violation** -- the smallest ``dw/dT`` and Durrleman ``g`` found on
+    that epoch's collocation points. This is the curve that says whether the
+    constraints are doing anything: it should cross into positive territory
+    during the penalty warm-up and stay there while the fit error keeps falling.
+    Hovering at zero means the constraints are binding and distorting the fit;
+    deeply positive from the start means they are doing nothing.
+
+    **Penalty terms** -- on a log scale, since a working run drives them to
+    exactly zero and a linear axis would show a flat line at the bottom.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    h = result.history
+    ep = np.arange(len(h["train_rmse_bps"]))
+    train, val = np.asarray(h["train_rmse_bps"]), np.asarray(h["val_rmse_bps"])
+    gap = val - train
+
+    fig, axes = plt.subplots(1, 4, figsize=(17.5, 3.8))
+
+    axes[0].plot(ep, train, lw=1.1, label="train")
+    axes[0].plot(ep, val, lw=1.1, label="validation")
+    axes[0].axvline(result.best_epoch, color="k", ls=":", lw=0.9,
+                    label=f"selected ({result.best_epoch})")
+    axes[0].set_ylabel("IV RMSE (bp)")
+    axes[0].set_title("Fit error", fontsize=10)
+
+    axes[1].plot(ep, gap, lw=1.1, color="tab:purple")
+    axes[1].fill_between(ep, 0, gap, alpha=0.15, color="tab:purple")
+    axes[1].axhline(0.0, color="k", lw=0.7, ls="-")
+    axes[1].axvline(result.best_epoch, color="k", ls=":", lw=0.9)
+    axes[1].scatter([result.best_epoch], [gap[result.best_epoch]], color="k",
+                    zorder=4, s=22,
+                    label=f"at selection: {gap[result.best_epoch]:+.1f}bp")
+    axes[1].set_ylabel("val - train (bp)")
+    axes[1].set_title("Generalisation gap", fontsize=10)
+
+    axes[2].plot(ep, h["worst_calendar"], lw=1.1, label="min  dw/dT")
+    axes[2].plot(ep, h["worst_butterfly"], lw=1.1, label="min  g")
+    axes[2].axhline(0.0, color="crimson", lw=0.9, ls="--")
+    axes[2].set_title("Worst violation on collocation points", fontsize=10)
+
+    axes[3].semilogy(ep, np.maximum(h["pen_calendar"], 1e-20), lw=1.1, label="calendar")
+    axes[3].semilogy(ep, np.maximum(h["pen_butterfly"], 1e-20), lw=1.1, label="butterfly")
+    axes[3].set_title("Penalty terms", fontsize=10)
+
+    for ax in axes:
+        ax.set_xlabel("epoch")
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.25)
+
+    fig.suptitle(
+        f"Training history - {len(ep)} epochs, best validation "
+        f"{result.best_val_rmse_bps:.1f}bp, gap at selection "
+        f"{gap[result.best_epoch]:+.1f}bp", fontsize=11)
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_model_comparison(records, path: str | None = None, show: bool = False):
+    """Validation error and generalisation gap across every archived run.
+
+    Reads straight off `volsurface.registry.RunRecord`, so it works whether the
+    runs came from the same session or from `models/` accumulated over weeks of
+    experiments -- the point of archiving every run instead of overwriting the
+    last one.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    if not records:
+        raise ValueError("no runs to compare")
+
+    ranked = sorted(records, key=lambda r: r.val_rmse_bps)
+    names = [r.run_id for r in ranked]
+    val = np.array([r.val_rmse_bps for r in ranked])
+    train = np.array([r.train_rmse_bps for r in ranked])
+    gap = np.array([r.generalization_gap_bps for r in ranked])
+
+    fig, axes = plt.subplots(1, 2, figsize=(max(9, 1.1 * len(ranked)), 4.2))
+    y = np.arange(len(ranked))
+
+    axes[0].barh(y, train, height=0.35, label="train", alpha=0.85)
+    axes[0].barh(y + 0.35, val, height=0.35, label="validation", alpha=0.85)
+    axes[0].set_yticks(y + 0.175, names, fontsize=8)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("IV RMSE (bp)")
+    axes[0].set_title("Fit -- best (top) to worst", fontsize=10)
+    axes[0].legend(fontsize=8)
+
+    colors = ["tab:red" if g > 15 else "tab:purple" for g in gap]
+    axes[1].barh(y, gap, height=0.5, color=colors, alpha=0.85)
+    axes[1].axvline(0, color="k", lw=0.7)
+    axes[1].set_yticks(y, names, fontsize=8)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("val - train (bp)")
+    axes[1].set_title("Generalisation gap  (red > 15bp)", fontsize=10)
+
+    for ax in axes:
+        ax.grid(alpha=0.25, axis="x")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_quote(surface: VolSurface, snapshot, strike: float, T: float,
+               path: str | None = None, show: bool = False):
+    """The smile at maturity ``T`` with one queried strike marked on it.
+
+    Shows the queried point against the *quotes* nearest that maturity, so it is
+    immediately obvious whether the answer is an interpolation between real
+    market data or an extrapolation the model invented.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    F, _ = snapshot.forward_at(T)
+    k_q = float(np.log(strike / F))
+
+    nearest = snapshot.maturities[int(np.argmin(np.abs(snapshot.maturities - T)))]
+    sl = snapshot.slice_at(nearest)
+    order = np.argsort(sl.k)
+
+    lo, hi = snapshot.k.min(), snapshot.k.max()
+    pad = 0.2 * (hi - lo)
+    grid = np.linspace(min(lo - pad, k_q - 0.05), max(hi + pad, k_q + 0.05), 300)
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.scatter(sl.k[order], sl.iv[order] * 100, s=16, c="black", zorder=3,
+               label=f"quotes at T = {nearest:.3f}y")
+    ax.plot(grid, surface.implied_vol(grid, np.full_like(grid, T)) * 100,
+            lw=1.8, color="tab:blue", label=f"{surface.name}, T = {T:.3f}y")
+
+    iv_q = float(surface.implied_vol(np.array([k_q]), np.array([T]))[0])
+    ax.plot([k_q], [iv_q * 100], "*", ms=16, color="crimson", zorder=4,
+            label=f"K = {strike:g}  ->  {iv_q:.2%}")
+
+    inside = sl.k.min() <= k_q <= sl.k.max()
+    ax.axvspan(grid[0], sl.k.min(), color="grey", alpha=0.08)
+    ax.axvspan(sl.k.max(), grid[-1], color="grey", alpha=0.08)
+    ax.set_xlabel("log-moneyness  k = log(K / F)")
+    ax.set_ylabel("implied volatility (%)")
+    ax.set_title(f"{snapshot.ticker}  K = {strike:g}, T = {T:.3f}y  "
+                 f"({'interpolated' if inside else 'EXTRAPOLATED'})", fontsize=10)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    return _finish(fig, path, show)

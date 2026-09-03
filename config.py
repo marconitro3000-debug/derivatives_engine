@@ -16,6 +16,17 @@ from pathlib import Path
 
 @dataclass
 class RunConfig:
+    # ── what to do ───────────────────────────────────────────────────────────
+    mode: str = "ask"
+    """"ask" shows the menu (train / price / compare). Set to "train", "price"
+    or "compare" to skip straight to it -- useful for a scheduled or scripted
+    run. Ignored when nothing is listening for input (falls back to "train")."""
+
+    show_plots: bool = True
+    """Pop figures up in a window as well as saving them, when there is a human
+    at the keyboard to look at them. Always off in a non-interactive run --
+    a window nobody can close would just hang it."""
+
     # ── what to fit ──────────────────────────────────────────────────────────
     ticker: str = "SPY"
     """Underlying to fit. Liquid ETFs and large caps work; illiquid names will
@@ -44,8 +55,9 @@ class RunConfig:
     de_americanize: bool = True
     """Listed equity and ETF options are American. Leaving this off inverts them
     with a European formula, which charges the early-exercise premium to
-    volatility -- on SPY that is ~12bp of vol beyond one year, against a fit
-    measured in tens of bp. Costs a few seconds; see `volsurface.american`."""
+    volatility -- on SPY that is ~13bp of vol on average and ~25bp beyond one
+    year, against a fit measured in tens of bp. Costs a few seconds; see
+    `volsurface.american`."""
 
     lattice_steps: int = 150
     """Steps in the binomial tree used for de-Americanisation. The premium is a
@@ -72,6 +84,15 @@ class RunConfig:
 
     # ── what to produce ──────────────────────────────────────────────────────
     output_dir: Path = Path("results")
+    """Always-overwritten pointer to the *most recent* run -- what mode [2]
+    (price) reads from. Fast, but not a history."""
+
+    models_dir: Path = Path("models")
+    """Every TRAIN run is archived here under its own timestamped folder --
+    weights, the chain it saw, the full training history, and metrics.json.
+    Never overwritten, so mode [3] (compare) has something to compare. See
+    `volsurface.registry`."""
+
     make_plots: bool = True
     save_model: bool = True
     run_baselines: bool = True
@@ -80,8 +101,18 @@ class RunConfig:
 
     verbose: bool = True
 
+    # ── pricing (mode "price", non-interactive only) ────────────────────────
+    price_maturities: tuple[float, ...] = (0.25, 0.5, 1.0)
+    """Maturities (years) to price when nothing is listening for input. In an
+    interactive run these are just the first prompt's default."""
+
+    price_strikes: tuple[float, ...] = ()
+    """Strikes to price non-interactively. Empty means a ladder around the
+    forward at each maturity in `price_maturities`."""
+
     def __post_init__(self):
         self.output_dir = Path(self.output_dir)
+        self.models_dir = Path(self.models_dir)
 
 
 #: The configuration `main.py` runs. Edit this.

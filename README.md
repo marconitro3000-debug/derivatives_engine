@@ -22,8 +22,29 @@ pip install -e .
 python main.py          # or just press Run
 ```
 
-No server, no flags, no arguments. Settings live in [`config.py`](config.py);
-output lands in `results/`.
+No server, no flags, no arguments. `main.py` asks what you want to do:
+
+```
+  [1]  Train a surface        fit a chain, score it, plot everything
+                              (~3 min: downloads live quotes)
+  [2]  Price off a surface    query the one trained last time
+                              (instant, no network)
+  [3]  Compare trained models which archived run to use, and why
+                              (instant, no network)
+```
+
+**Train** writes the report, the training curves and the arbitrage maps to
+`results/`, and archives the model, the chain and the full training history
+under `models/<ticker>_<timestamp>/` — every run kept, nothing overwritten.
+**Price** loads the surface and queries it interactively: a strike and a
+maturity in, implied vol / price / Greeks / local no-arbitrage check out, plus
+the smile with your strike marked on it. **Compare** ranks every archived run by
+validation error and generalisation gap, so after a few experiments there is an
+answer to "which checkpoint do I actually use" instead of a folder of
+`.pt` files to guess between.
+
+Settings live in [`config.py`](config.py); set `mode = "train"` there to skip
+the menu for a scheduled run.
 
 📓 **[`notebook.ipynb`](notebook.ipynb)** — the same study written as a paper,
 every claim backed by a runnable cell, committed with its outputs so it renders
@@ -35,25 +56,35 @@ full API, every config knob, troubleshooting.
 
 ## Result
 
-Live SPY chain, 1,400 quotes across 8 expiries from 13 days to 1.8 years.
+Live SPY chain, 1,387 quotes across 8 expiries from 8 days to 1.8 years.
 Every surface is scored by identical code:
 
 ```
 surface                              IV RMSE   max err   px RMSE  in spread  cal viol  bfly viol
 ------------------------------------------------------------------------------------------------
-Neural (SSVI prior + penalties)        31.7bp    598.6bp    0.3587       8.9%     0.00%      0.00%
-SVI (per-slice)                        49.3bp    558.4bp    0.5783       5.6%     0.81%      0.05%
-SSVI (joint)                          115.8bp   1414.8bp    1.0710       2.1%     0.00%      0.00%
+Neural (SSVI prior + penalties)        24.4bp    673.7bp    0.3291      15.4%     0.00%      0.00%
+SVI (per-slice)                        47.5bp    637.4bp    0.6020       5.9%     0.00%      0.04%
+SSVI (joint)                          105.8bp    828.5bp    1.0837       2.6%     0.00%      0.00%
 ```
 
-The neural surface fits **1.6× closer than per-slice SVI and 3.7× closer than
-SSVI** in vol space, is the best of the three in price space, and is the only one
-of the two arbitrage-free surfaces that fits. Full run in
-[`docs/example_report.txt`](docs/example_report.txt).
+The neural surface fits **1.9× closer than per-slice SVI and 4.3× closer than
+SSVI** in vol space, is the best of the three in price space, and is free of
+static arbitrage everywhere on this run — including where SVI (0.04%) is not.
+Full run in [`docs/example_report.txt`](docs/example_report.txt).
 
 ![smiles](docs/figures/smiles.png)
 
 Shaded bands are where no options trade — the region a surface has to invent.
+
+The training itself, not just the result — fit, generalisation gap, whether the
+constraints are actually binding:
+
+![training curves](docs/figures/training.png)
+
+Validation error sitting below training and a generalisation gap that flattens
+rather than widens is what "this will hold up on tomorrow's chain" looks like;
+the third panel is the constraints crossing into compliance during warm-up and
+staying there while the fit keeps improving.
 
 ![arbitrage map](docs/figures/arbitrage_neural.png)
 
@@ -91,16 +122,16 @@ SPY options are **American**. A European inversion has nowhere to put the
 early-exercise premium and charges it to volatility. Measured on the chain above:
 
 ```
-removed 13.27bp of vol on average (median 0.99, p95 67.85, max 262.53)
-  calls   0.27bp mean   puts  20.16bp mean
-  T in [0.00, 0.15)  n= 321  mean   0.41bp  p95   2.38bp
-  T in [0.15, 0.50)  n= 341  mean   7.43bp  p95  26.88bp
-  T in [0.50, 1.00)  n= 164  mean  10.98bp  p95  50.63bp
-  T >= 1.00          n= 574  mean  24.59bp  p95 116.61bp
+removed 15.14bp of vol on average (median 2.94, p95 71.23, max 274.22)
+  calls   0.00bp mean   puts  24.02bp mean
+  T in [0.00, 0.15)  n= 250  mean   0.95bp  p95   3.96bp
+  T in [0.15, 0.50)  n= 381  mean  10.44bp  p95  35.91bp
+  T in [0.50, 1.00)  n= 170  mean  11.51bp  p95  54.87bp
+  T >= 1.00          n= 586  mean  25.30bp  p95 122.98bp
 ```
 
 Exactly where theory says it should be: nothing in the calls, everything in the
-puts, growing with maturity. Against a fit measured at 32bp, ignoring it would
+puts, growing with maturity. Against a fit measured at 24bp, ignoring it would
 have been a bias larger than the thing being fitted.
 
 So the quotes are **de-Americanised** before they reach the surface. The premium
@@ -193,7 +224,8 @@ volsurface/
     surface.py             the VolSurface interface — everything is total variance
     diagnostics.py         arbitrage scans and fit reports
     svi.py                 raw SVI (quasi-explicit) and joint SSVI
-    report.py              scorecards and figures
+    report.py              scorecards, training curves, smiles, arbitrage maps
+    registry.py            archive of trained runs — which checkpoint to use
     montecarlo.py          independent numerical check on the analytic formula
     conventions.py         day counts
     neural/

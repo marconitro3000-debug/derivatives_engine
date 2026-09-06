@@ -12,6 +12,7 @@ Python API, every configuration knob, and what to do when something breaks.
 - [Jupyter](#jupyter)
 - [Configuration reference](#configuration-reference)
 - [Python API](#python-api)
+- [Pricing an option](#pricing-an-option)
 - [Tests](#tests)
 - [Troubleshooting](#troubleshooting)
 
@@ -494,15 +495,140 @@ vs.de_americanised_iv(spot, K, T, r, q, F, DF, mid, "put", sigma_european)
 vs.carry_from_forward(spot, forward, discount, T)   # -> (r, q)
 ```
 
-Pricing off a fitted surface at an unlisted strike:
+Those are the primitives. To price a *named* option off a fitted surface, use
+`price_option` rather than assembling the forward and the discount factor by
+hand — see the section below.
+
+---
+
+## Pricing an option
+
+`price_option` is the one entry point that speaks in options rather than in
+`(k, T)`. Give it a strike, an expiry and a side; it returns an `OptionQuote`.
 
 ```python
-Ts = chain.maturities
-F  = np.interp(T, Ts, [chain.forwards[t]  for t in Ts])
-DF = np.interp(T, Ts, [chain.discounts[t] for t in Ts])
-k  = np.log(strike / F)
-sigma = surface.implied_vol(np.array([k]), np.array([T]))[0]
-px = DF * vs.price(F, strike, T, 0.0, sigma, "call")   # S=F, r=0 is the forward measure
+from volsurface import ChainSnapshot, NeuralVolSurface, price_option
+
+chain   = ChainSnapshot.load("results/spy_chain.npz")
+surface = NeuralVolSurface.load("results/spy_surface.pt")
+
+q = price_option(surface, chain, strike=780, expiry="2026-12-19", kind="put")
+print(q.summary())
+```
+
+```
+SPY 780 put  exp 2026-12-19  (T = 0.2849y)
+  surface fitted 2026-09-06
+
+  implied vol       13.54%
+  price            24.2961
+
+  delta            -0.5110   (forward)
+  delta_spot       -0.5151
+  gamma           0.007094
+  vega              1.6490   per 1% of vol
+  theta            -0.1073   per day
+
+  k = +0.0048   forward 776.2690   discount 0.998015
+  within the quoted strike and maturity range
+  dw/dT +2.298e-02   g +1.113e+00   (both must be >= 0)
+```
+
+### Naming the expiry
+
+| You have | You pass | Notes |
+|---|---|---|
+| A calendar date | `"2026-12-19"`, `date(2026, 12, 19)`, a `datetime` | Measured from `chain.asof` |
+| Days out | `"45d"` | Calendar days from `chain.asof` |
+| A year fraction | `0.25`, `"0.25"` | Passed through; must be in `(0, 100]` |
+
+A date is converted against the day the **chain** was snapshotted, not against
+today. A surface fitted last Tuesday has to keep pricing a December expiry at
+the maturity it had last Tuesday; measuring from today would quietly shorten
+every maturity by the age of the chain, and would make the same call return a
+different number tomorrow with no new data.
+
+Two inputs are refused rather than answered. A maturity at or below zero has no
+implied vol to look up — an expired option is an intrinsic-value question, not a
+surface question — and a numeric expiry above 100 years is a date that lost its
+dashes (`"2026"`, `"20261219"`), not an intent.
+
+### What comes back
+
+```python
+q.strike, q.expiry, q.T, q.kind     # what was asked
+q.forward, q.discount               # fitted from the chain, not assumed
+q.log_moneyness                     # log(K / F_T)
+
+q.implied_vol                       # the surface at exactly this (k, T)
+q.price                             # DF * Black76(F, K, T, sigma)
+q.delta, q.delta_spot
+q.gamma, q.vega, q.theta            # vega per 1% of vol, theta per day
+
+q.in_quoted_strikes                 # was there a quote near this strike
+q.in_quoted_maturities              #   ... and near this expiry
+q.is_extrapolated                   # not (both of the above)
+q.dw_dT, q.butterfly_g              # the no-arbitrage conditions, right here
+q.arbitrage_free                    # both >= 0
+```
+
+`OptionQuote` is a frozen dataclass, so a priced quote is a record of an answer
+rather than a scratchpad — `dataclasses.asdict(q)` if you want to log it.
+
+### The three things it does that a bare Black-Scholes call cannot
+
+**The forward and the discount factor come from the chain.** Both were fitted
+from put-call parity on the quotes, iterated to a fixed point against
+de-Americanised prices. Pricing against a spot and an assumed carry would quote
+the volatility against a different forward than the one the surface was
+calibrated in — on an eighteen-month expiry that error is close to 1%.
+
+**It says when the answer is extrapolated.** A strike or an expiry outside the
+quoted range still gets a number: the bounded parametrisation guarantees the
+surface degrades to the SSVI prior rather than to noise out there. But that
+number is the model's opinion, not the market's, and `is_extrapolated` — and the
+`! EXTRAPOLATED` line in `summary()` — says which of the two axes left the data.
+
+**It reports the local no-arbitrage conditions.** The dense scan in
+`diagnostics` answers "is this surface clean". `q.dw_dT` and `q.butterfly_g`
+answer the narrower and more useful question: is the specific number about to be
+traded on clean.
+
+### Greeks convention
+
+The surface lives in the forward measure, so the internally consistent set is
+the sensitivities of the **discounted** price with respect to the **forward**:
+
+```
+price = DF * Black76(F, K, T, sigma)
+
+delta = d(price)/dF          vega  = d(price)/d(sigma), per 1% of vol
+gamma = d2(price)/dF2        theta = d(price)/dt, per calendar day
+```
+
+All four carry the discount factor — mixing discounted and undiscounted
+sensitivities in one row is a percent-level error on delta at a long expiry and
+is invisible in the output. `delta_spot` converts to a spot delta under
+`dF/dS = F/S`, which holds here by construction, and is reported separately
+rather than silently substituted.
+
+### Any surface, not just the neural one
+
+`price_option` takes a `VolSurface`, so the baselines price through the same
+code path — which is the point, and the same reason the scorecard is trustworthy:
+
+```python
+from volsurface import SSVISurface, SVISliceSurface
+
+for surf in (surface, SSVISurface.fit(chain), SVISliceSurface.fit(chain)):
+    q = price_option(surf, chain, 780, "2026-12-19", "put")
+    print(f"{surf.name:<34} {q.implied_vol:>7.2%}  {q.price:>9.4f}")
+```
+
+```
+Neural (SSVI prior + penalties)     13.54%    24.2961
+SSVI (joint)                        13.42%    24.1061
+SVI (per-slice)                     13.74%    24.6287
 ```
 
 ---
@@ -510,7 +636,7 @@ px = DF * vs.price(F, strike, T, 0.0, sigma, "call")   # S=F, r=0 is the forward
 ## Tests
 
 ```bash
-pytest                              # 100 tests, no network required
+pytest                              # 126 tests, no network required
 pytest tests/test_marketdata.py     # one module
 pytest -k de_americanis             # one topic
 pytest -x -q                        # stop at the first failure

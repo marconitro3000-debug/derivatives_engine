@@ -2,9 +2,11 @@
 volsurface/conventions.py
 Day-count conventions for converting calendar dates to year fractions.
 
-Replaces the ad-hoc `(end - start).days / 365.0` scattered across the
-codebase (data/ingestion.py, arbitrage/vol_surface.py) with explicit,
-named conventions.
+One named convention instead of an ad-hoc `(end - start).days / 365.0` at
+every call site. ACT/365F is what the chain is built with and what the
+surface is therefore fitted in, so `pricer.resolve_maturity` defaults to it
+too -- converting a date with a different day count would price at a
+maturity the surface was never calibrated at.
 """
 
 from __future__ import annotations

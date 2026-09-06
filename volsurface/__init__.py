@@ -32,6 +32,7 @@ Module map
     impliedvol    inversion, with an identifiability guard
     chain         option chain -> clean (k, T, IV) cloud
     surface       the VolSurface interface
+    pricer        price one named option (strike, expiry date, side)
     diagnostics   arbitrage scans and fit reports
     svi           raw SVI and joint SSVI baselines
     neural        the network: prior, model, penalties, training
@@ -60,6 +61,7 @@ from .neural import (
     TrainResult,
     train_surface,
 )
+from .pricer import OptionQuote, price_option, resolve_maturity
 from .report import (
     compare,
     comparison_table,
@@ -89,6 +91,8 @@ __all__ = [
     "NeuralVolSurface", "ModelConfig",
     # fitting
     "TrainConfig", "TrainResult", "PenaltyWeights", "train_surface",
+    # pricing one named option off a fitted surface
+    "OptionQuote", "price_option", "resolve_maturity",
     # scoring
     "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage",
     "evaluate_surface", "compare", "comparison_table", "worst_quote_notes",

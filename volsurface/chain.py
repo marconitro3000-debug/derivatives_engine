@@ -556,7 +556,7 @@ def synthetic_snapshot(
 ) -> ChainSnapshot:
     """A chain generated from a known arbitrage-free SSVI surface.
 
-    Used by the tests and by ``scripts/fit_surface.py --synthetic``: because the
+    Used by the tests and by ``use_live_data = False``: because the
     ground-truth surface is known and provably arbitrage-free, any violation the
     diagnostics report on a fit of this data is a defect in the *model*, not a
     feature of the market.

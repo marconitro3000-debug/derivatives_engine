@@ -273,3 +273,121 @@ def test_save_and_load_roundtrip(tmp_path, noisy_chain, trained):
     T = np.full_like(k, 0.7)
     assert np.allclose(reloaded.total_variance(k, T),
                        trained.model.total_variance(k, T), rtol=1e-12)
+
+
+# -- regressions on the fixes above -------------------------------------------
+
+def test_validation_reaches_the_wings_of_the_smile(noisy_chain):
+    """The held-out strikes must include wing quotes, not only interior ones.
+
+    Drawing validation from the interior alone kept every hard quote in the
+    training set and made the reported validation RMSE come out below the
+    training RMSE -- a property of the split, not of the model.
+    """
+    reached_wing = 0
+    for seed in range(6):
+        _, val_idx = stratified_split(noisy_chain, 0.2, seed=seed)
+        for T in np.unique(noisy_chain.T[val_idx]):
+            expiry = np.flatnonzero(noisy_chain.T == T)
+            held = val_idx[noisy_chain.T[val_idx] == T]
+            k_all = np.sort(noisy_chain.k[expiry])
+            # A "wing" quote: among the two lowest or two highest strikes.
+            edge = set(k_all[:2].tolist()) | set(k_all[-2:].tolist())
+            reached_wing += len(edge.intersection(noisy_chain.k[held].tolist()))
+    assert reached_wing > 0
+
+
+def test_every_quote_can_be_held_out(noisy_chain):
+    """No quote is structurally excluded from validation across seeds."""
+    T0 = np.unique(noisy_chain.T)[0]
+    expiry = set(np.flatnonzero(noisy_chain.T == T0).tolist())
+    seen = set()
+    for seed in range(40):
+        _, val_idx = stratified_split(noisy_chain, 0.25, seed=seed)
+        seen |= expiry.intersection(val_idx.tolist())
+    assert len(seen) > 0.5 * len(expiry)
+
+
+def test_patience_is_not_spent_during_warmup(noisy_chain):
+    """Early stopping must not fire the moment the warm-up ends.
+
+    `epochs_since_best` used to run from epoch zero while model selection only
+    started at `warmup_epochs`, so a run with patience <= warmup stopped almost
+    immediately after the ramp.
+    """
+    cfg = TrainConfig(epochs=200, warmup_epochs=100, patience=40, seed=0)
+    cfg.penalties.n_points = 256
+    result = train_surface(noisy_chain, cfg)
+    assert len(result.history["loss"]) > cfg.warmup_epochs + 1
+
+
+def test_derivative_cache_returns_to_the_right_values(model):
+    """The memoised gradients must track the inputs, not the last call."""
+    k1 = np.linspace(-0.4, 0.4, 25)
+    k2 = np.linspace(-0.2, 0.6, 25)
+    T = np.full_like(k1, 0.5)
+
+    first = model.dw_dk(k1, T)
+    model.dw_dk(k2, T)                       # different inputs, evicts the entry
+    assert np.allclose(model.dw_dk(k1, T), first, rtol=1e-12)
+
+    # All three derivatives off one cached backward pass agree with a fresh one.
+    cached = (model.dw_dk(k1, T), model.d2w_dk2(k1, T), model.dw_dT(k1, T))
+    model._invalidate_grad_cache()
+    fresh = (model.dw_dk(k1, T), model.d2w_dk2(k1, T), model.dw_dT(k1, T))
+    for c, f in zip(cached, fresh):
+        assert np.allclose(c, f, rtol=1e-12)
+
+
+def test_construction_does_not_disturb_the_global_rng(prior):
+    """Building a model must not reseed torch for whoever called it."""
+    torch.manual_seed(1234)
+    before = torch.randn(3, dtype=torch.float64)
+    torch.manual_seed(1234)
+    NeuralVolSurface(prior, ModelConfig(seed=99))
+    after = torch.randn(3, dtype=torch.float64)
+    assert torch.allclose(before, after)
+
+
+def test_model_name_identifies_its_prior(prior):
+    """The flat-prior ablation needs its own row in the scorecard."""
+    assert "SSVI prior" in NeuralVolSurface(prior, ModelConfig()).name
+    assert "flat prior" in NeuralVolSurface(FlatPrior(0.2), ModelConfig()).name
+
+
+def test_fit_report_locates_and_weights_the_worst_quote(noisy_chain, trained):
+    from volsurface.diagnostics import fit_report
+
+    rep = fit_report(trained.model, noisy_chain)
+    k, T = rep.max_vol_at
+    assert noisy_chain.k.min() <= k <= noisy_chain.k.max()
+    assert noisy_chain.T.min() <= T <= noisy_chain.T.max()
+    assert rep.max_vol_weight > 0.0
+    assert f"{rep.max_vol_bps:.1f}bp" in rep.worst_quote_note()
+
+
+def test_selected_epoch_is_arbitrage_free_when_one_exists(noisy_chain):
+    """Model selection must prefer a clean epoch over a marginally better dirty one."""
+    cfg = TrainConfig(epochs=300, warmup_epochs=60, patience=300, seed=0)
+    cfg.penalties.n_points = 512
+    result = train_surface(noisy_chain, cfg)
+
+    assert result.best_is_feasible
+    assert result.history["worst_calendar"][result.best_epoch] >= -cfg.feasible_tol
+    assert result.history["worst_butterfly"][result.best_epoch] >= -cfg.feasible_tol
+
+
+def test_history_and_weights_describe_the_same_epoch(noisy_chain):
+    """The selected epoch's recorded error must be the shipped model's error."""
+    from volsurface.neural.dataset import stratified_split, to_tensors
+    from volsurface.neural.train import _weighted_rmse_bps
+
+    cfg = TrainConfig(epochs=200, warmup_epochs=40, patience=200, seed=0)
+    cfg.penalties.n_points = 256
+    result = train_surface(noisy_chain, cfg)
+
+    _, val_idx = stratified_split(noisy_chain, cfg.val_fraction, cfg.seed)
+    val = to_tensors(noisy_chain, val_idx)
+    with torch.no_grad():
+        rmse = float(_weighted_rmse_bps(result.model, val))
+    assert rmse == pytest.approx(result.best_val_rmse_bps, rel=1e-9)

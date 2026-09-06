@@ -214,7 +214,7 @@ van separadas por comas. `--hidden` acepta `256x4` (cuatro capas de 256) o
 ## Tests
 
 ```bash
-pytest                            # los 100, sin red
+pytest                            # los 126, sin red
 pytest -q                         # sin ruido
 pytest tests/test_neural_surface.py -v          # sólo la red
 pytest -k "arbitrage or feasible" -v            # por nombre

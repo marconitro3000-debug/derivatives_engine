@@ -300,6 +300,7 @@ volsurface/
     blackscholes.py        closed-form price and Greeks
     impliedvol.py          inversion, with an identifiability guard
     surface.py             the VolSurface interface — everything is total variance
+    pricer.py              strike + expiry date + side -> price, Greeks, caveats
     diagnostics.py         arbitrage scans and fit reports
     svi.py                 raw SVI (quasi-explicit) and joint SSVI
     report.py              scorecards, training curves, smiles, arbitrage maps
@@ -312,7 +313,7 @@ volsurface/
         arbitrage.py       autodiff penalties on collocation points
         dataset.py         tensors and the stratified split
         train.py           vega-weighted objective, penalty warm-up, feasible-epoch selection
-tests/                     100 tests, no network required
+tests/                     126 tests, no network required
 ```
 
 ## Using it as a library
@@ -326,8 +327,31 @@ chain  = fetch_chain("SPY")
 result = train_surface(chain)
 
 print(comparison_table(compare(chain, result)))
-print(result.model.implied_vol([-0.1, 0.0, 0.1], [0.5, 0.5, 0.5]))
 ```
+
+To price an actual option — the strike, the expiry date and the side, the way
+one is named — `price_option` is the only entry point you need:
+
+```python
+from volsurface import price_option
+
+q = price_option(result.model, chain, strike=780, expiry="2026-12-19", kind="put")
+
+q.price            # 24.2961
+q.implied_vol      # 0.1354
+q.delta            # -0.5110   (forward delta; q.delta_spot for the spot one)
+q.is_extrapolated  # False -- there were quotes near this strike and expiry
+q.arbitrage_free   # True  -- dw/dT and Durrleman g both >= 0 right here
+print(q.summary())
+```
+
+The expiry can be a date, a year fraction (`0.25`) or days (`"45d"`); a date is
+measured against the day the *chain* was snapshotted, not against today, so a
+surface fitted last Tuesday keeps pricing a December expiry at the maturity it
+had last Tuesday. The forward and the discount factor come from the chain,
+where they were fitted from put-call parity — pricing against a spot and an
+assumed carry would quote the vol against a different forward than the one it
+was calibrated in.
 
 `use_live_data = False` in `config.py` (or `synthetic_snapshot()`) generates a
 chain from a known arbitrage-free SSVI surface — useful because any violation

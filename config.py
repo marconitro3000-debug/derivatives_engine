@@ -38,6 +38,12 @@ class RunConfig:
     to a generated chain automatically and says so, so pressing Run always
     produces a result."""
 
+    chain_file: Path | None = None
+    """Fit an already-downloaded chain (a `*_chain.npz` written by a previous
+    train run) instead of fetching one. Overrides `use_live_data`. This is what
+    makes an experiment reproducible: a sweep over architectures has to see the
+    same quotes in every arm, and two runs a minute apart do not."""
+
     max_expiries: int = 8
     """Expiries are sampled evenly in sqrt(T) across the whole listed term
     structure, not taken from the front. Eight covers a week to two years."""
@@ -99,7 +105,29 @@ class RunConfig:
     """Fitting per-slice SVI is the slowest step. It is also the point of the
     comparison, so it is on by default."""
 
+    run_prior_ablation: bool = True
+    """Retrain the same network against a flat, constant-vol prior and put it in
+    the table as its own row. This is the experiment that answers the first
+    question anyone asks about a prior-plus-correction model -- how much of the
+    result is the network and how much is the SSVI shape it started from -- and
+    without it the headline number is not interpretable. Costs one extra
+    training run (roughly doubles the fit time); set to False when iterating."""
+
     verbose: bool = True
+
+    # ── capacity sweep (mode "sweep") ────────────────────────────────────────
+    sweep_architectures: tuple[str, ...] = ("32x2", "64x3", "128x3", "256x4", "512x4")
+    """Architectures to fit, as WIDTHxDEPTH, all on the same chain with the same
+    budget and the same seed. This is the experiment that answers "is the network
+    too small?" with a number instead of an opinion: the surface has a few dozen
+    effective degrees of freedom, so the expectation is that validation error
+    flattens and then worsens well before the parameter count gets interesting.
+    Run it and see, rather than arguing about it."""
+
+    sweep_seeds: int = 1
+    """Seeds per architecture. One is enough to see the shape of the curve; three
+    is what you want before claiming two architectures actually differ, since
+    run-to-run scatter on a real chain is a few basis points."""
 
     # ── pricing (mode "price", non-interactive only) ────────────────────────
     price_maturities: tuple[float, ...] = (0.25, 0.5, 1.0)
@@ -113,6 +141,9 @@ class RunConfig:
     def __post_init__(self):
         self.output_dir = Path(self.output_dir)
         self.models_dir = Path(self.models_dir)
+        if self.chain_file is not None:
+            self.chain_file = Path(self.chain_file)
+        self.hidden_layers = tuple(self.hidden_layers)
 
 
 #: The configuration `main.py` runs. Edit this.

@@ -87,8 +87,31 @@ def comparison_table(scores: list[SurfaceScore]) -> str:
     return "\n".join(lines)
 
 
-def compare(snapshot, result, include_baselines: bool = True) -> list[SurfaceScore]:
+def worst_quote_notes(scores: list[SurfaceScore]) -> str:
+    """Where each surface's ``max err`` actually sits, and at what weight.
+
+    The table's worst-single-quote column is the one number in it that is
+    routinely misread. On a real chain it lands on a deep wing quote carrying a
+    fitting weight near zero -- the vega/spread weighting deliberately declining
+    to chase a vol that its own price barely identifies. Printed bare it looks
+    like a blow-up; printed with its coordinates and its weight it reads as what
+    it is.
+    """
+    lines = []
+    for s in scores:
+        note = s.fit.worst_quote_note()
+        if note:
+            lines.append(f"  {s.name:<34} {note}")
+    return "\n".join(lines)
+
+
+def compare(snapshot, result, include_baselines: bool = True,
+            extra_surfaces: tuple = ()) -> list[SurfaceScore]:
     """Score the trained neural surface next to the parametric baselines.
+
+    `extra_surfaces` are scored straight after it and before the baselines --
+    that is where the flat-prior ablation goes, so the table reads "network with
+    the prior / network without it / prior alone".
 
     A baseline that fails to calibrate (too few quotes on some expiry, a
     degenerate smile) is skipped with a note rather than aborting the run --
@@ -97,6 +120,7 @@ def compare(snapshot, result, include_baselines: bool = True) -> list[SurfaceSco
     from volsurface.svi import SSVISurface, SVISliceSurface
 
     scores = [evaluate_surface(result.model, snapshot)]
+    scores += [evaluate_surface(s, snapshot) for s in extra_surfaces]
 
     if include_baselines:
         for name, factory in (("SVI (per-slice)", SVISliceSurface.fit),
@@ -230,9 +254,10 @@ def plot_training(result, path: str | None = None, show: bool = False):
     """The four curves that say whether a run worked and will hold up.
 
     **Fit** -- training and validation IV error, with the selected epoch marked.
-    Validation below training here is normal, not a bug: the held-out strikes
-    are interior points of each smile, and the vega weighting that defines the
-    error is renormalised per split.
+    The held-out strikes span the whole smile, wings included, so validation
+    sitting a little above training is the expected picture; validation *below*
+    training is the signature of a split that is quietly holding out only the
+    easy points.
 
     **Generalisation gap** -- ``val - train`` explicitly, filled, because a gap
     that is small and flat is a different story from one that starts small and

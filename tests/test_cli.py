@@ -81,3 +81,42 @@ def test_help_renders():
     text = build_parser().format_help()
     assert "--hidden" in text and "--chain-file" in text
     assert "25%" in text or "25% of its own mid" in text
+
+
+# -- the menu's price table and the library must not drift --------------------
+
+def test_the_price_table_is_the_library_pricer(clean_chain):
+    """`quote_table` used to be a second pricing path, and it drifted: vega and
+    theta carried the discount factor and delta and gamma did not, which is an
+    8% error on delta at an eighteen-month expiry and invisible in the output.
+    Every row is a `price_option` call now, so the two cannot disagree."""
+    from main import quote_table
+    from volsurface import price_option
+    from volsurface.svi import SSVISurface
+
+    surface = SSVISurface.fit(clean_chain)
+    T = float(clean_chain.maturities[-1])
+    K = float(clean_chain.spot)
+
+    quote = price_option(surface, clean_chain, K, T, "call")
+    row = [line for line in quote_table(surface, clean_chain, [K], T).splitlines()
+           if line.strip().startswith(f"{K:.2f}")]
+
+    assert len(row) == 1, "expected exactly one priced row"
+    fields = row[0].split()
+    # strike, k, IV, call, put, delta, vega, gamma, theta, dw/dT, g, where
+    assert float(fields[3]) == pytest.approx(quote.price, abs=5e-4)
+    assert float(fields[5]) == pytest.approx(quote.delta, abs=5e-4)
+    assert float(fields[6]) == pytest.approx(quote.vega, abs=5e-4)
+    assert float(fields[8]) == pytest.approx(quote.theta, abs=5e-4)
+
+
+def test_the_price_table_refuses_what_the_pricer_refuses(clean_chain):
+    """An impossible maturity has to reach the caller as the pricer's error, so
+    the interactive loop can print it and stay alive rather than crashing."""
+    from main import quote_table
+    from volsurface.svi import SSVISurface
+
+    surface = SSVISurface.fit(clean_chain)
+    with pytest.raises(ValueError, match="plausible maturity"):
+        quote_table(surface, clean_chain, [float(clean_chain.spot)], 0.0)

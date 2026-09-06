@@ -155,6 +155,10 @@ that can show a window, the smile with your strike marked on it so you can see
 at a glance whether the answer came from interpolating real quotes or from
 extrapolating past them.
 
+Every row goes through [`price_option`](#pricing-an-option), so the table and
+the library cannot disagree, and all four Greeks are sensitivities of the
+discounted price to the forward.
+
 Querying past twice the longest fitted expiry prints a warning: the answer
 still degrades gracefully to the SSVI prior rather than to noise, but it is not
 information the market gave you.
@@ -636,7 +640,7 @@ SVI (per-slice)                     13.74%    24.6287
 ## Tests
 
 ```bash
-pytest                              # 126 tests, no network required
+pytest                              # 128 tests, no network required
 pytest tests/test_marketdata.py     # one module
 pytest -k de_americanis             # one topic
 pytest -x -q                        # stop at the first failure

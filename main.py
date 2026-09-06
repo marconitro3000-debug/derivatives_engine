@@ -63,7 +63,6 @@ from volsurface import (
     comparison_table,
     evaluate_surface,
     fetch_chain,
-    greeks,
     list_runs,
     load_history,
     load_run,
@@ -72,14 +71,13 @@ from volsurface import (
     plot_model_comparison,
     plot_quote,
     plot_training,
-    price,
+    price_option,
     runs_table,
     save_run,
     synthetic_snapshot,
     train_surface,
     worst_quote_notes,
 )
-from volsurface.diagnostics import butterfly_g
 
 
 # ── presentation ─────────────────────────────────────────────────────────────
@@ -702,40 +700,43 @@ def load_fitted(cfg: RunConfig):
 
 
 def quote_table(surface, chain, strikes, T) -> str:
-    """Implied vol, price, Greeks and the local no-arbitrage checks per strike."""
-    F, DF = chain.forward_at(T)
-    k = np.log(np.asarray(strikes, dtype=float) / F)
-    Tv = np.full_like(k, float(T))
+    """Implied vol, price, Greeks and the local no-arbitrage checks per strike.
 
-    iv = surface.implied_vol(k, Tv)
-    dwdT = surface.dw_dT(k, Tv)
-    g = butterfly_g(surface, k, Tv)
+    Every row is a `volsurface.price_option` call -- the same function the
+    library exposes -- rather than a second pricing path assembled here. The
+    two were separate once and they drifted: this table discounted vega and
+    theta but not delta and gamma, which at an eighteen-month expiry is an 8%
+    error on the sensitivity most likely to be acted on, and invisible in the
+    output because every column looks equally plausible.
+    """
+    strikes = np.asarray(strikes, dtype=float)
+    if strikes.size == 0:
+        return "  no strikes to price."
 
-    k_lo, k_hi = chain.k.min(), chain.k.max()
+    calls = [price_option(surface, chain, K, float(T), "call") for K in strikes]
+    puts = [price_option(surface, chain, K, float(T), "put") for K in strikes]
+
+    F, DF = calls[0].forward, calls[0].discount
     header = (f"{'strike':>9} {'k':>8} {'IV':>8} {'call':>10} {'put':>10} "
               f"{'delta':>8} {'vega':>8} {'gamma':>9} {'theta':>8} "
               f"{'dw/dT':>10} {'g':>9}  where")
     lines = [header, "-" * len(header)]
 
-    for i, K in enumerate(np.asarray(strikes, dtype=float)):
-        sig = float(iv[i])
-        # S = F with r = 0 is the Black-76 forward measure; discount once.
-        call = DF * price(F, K, T, 0.0, sig, "call")
-        put = DF * price(F, K, T, 0.0, sig, "put")
-        gk = greeks(F, K, T, 0.0, sig)
-        inside = k_lo <= k[i] <= k_hi
+    for c, p in zip(calls, puts):
         lines.append(
-            f"{K:>9.2f} {k[i]:>+8.3f} {sig:>7.2%} {call:>10.3f} {put:>10.3f} "
-            f"{gk['delta_call']:>8.3f} {gk['vega'] * DF:>8.3f} {gk['gamma']:>9.5f} "
-            f"{gk['theta_call'] * DF:>8.3f} "
-            f"{dwdT[i]:>+10.2e} {g[i]:>+9.2e}  "
-            f"{'quoted' if inside else 'EXTRAP'}"
+            f"{c.strike:>9.2f} {c.log_moneyness:>+8.3f} {c.implied_vol:>7.2%} "
+            f"{c.price:>10.3f} {p.price:>10.3f} "
+            f"{c.delta:>8.3f} {c.vega:>8.3f} {c.gamma:>9.5f} {c.theta:>8.3f} "
+            f"{c.dw_dT:>+10.2e} {c.butterfly_g:>+9.2e}  "
+            f"{'EXTRAP' if c.is_extrapolated else 'quoted'}"
         )
 
     lines.append("")
     lines.append(f"  forward {F:.3f}   discount {DF:.5f}   "
                  f"(interpolated from the chain's fitted expiries)")
-    lines.append("  delta/vega/theta are the call's; vega per 1% of vol, theta per day")
+    lines.append("  delta/vega/gamma/theta are the call's, and all four are")
+    lines.append("  sensitivities of the discounted price to the forward;")
+    lines.append("  vega per 1% of vol, theta per day")
     lines.append("  dw/dT and g must both be >= 0 -- they are the no-arbitrage")
     lines.append("  conditions evaluated at exactly the point you asked about")
     return "\n".join(lines)
@@ -771,7 +772,10 @@ def run_price(cfg: RunConfig) -> int:
             strikes = list(cfg.price_strikes) or default_ladder(chain, T)
             say()
             say(rule(f"T = {T}y"))
-            say(quote_table(surface, chain, strikes, T))
+            try:
+                say(quote_table(surface, chain, strikes, T))
+            except ValueError as exc:
+                say(f"  cannot price at T = {T}: {exc}")
         return 0
 
     say()
@@ -812,7 +816,13 @@ def run_price(cfg: RunConfig) -> int:
                 continue
 
         say()
-        say(quote_table(surface, chain, strikes, T))
+        try:
+            say(quote_table(surface, chain, strikes, T))
+        except ValueError as exc:
+            # The pricer refuses inputs it cannot answer honestly -- an expired
+            # maturity, a strike of zero. Say so and stay in the loop.
+            say(f"  {exc}")
+            continue
 
         if show:
             plot_quote(surface, chain, float(strikes[len(strikes) // 2]), T, show=True)

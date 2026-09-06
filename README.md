@@ -313,7 +313,7 @@ volsurface/
         arbitrage.py       autodiff penalties on collocation points
         dataset.py         tensors and the stratified split
         train.py           vega-weighted objective, penalty warm-up, feasible-epoch selection
-tests/                     126 tests, no network required
+tests/                     128 tests, no network required
 ```
 
 ## Using it as a library

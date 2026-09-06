@@ -60,6 +60,13 @@ class RunRecord:
 
     dir: str                   # populated on load; not written into metrics.json
 
+    ablation_flat_rmse_bps: float | None = None
+    """Same network, same budget, flat constant-vol prior instead of SSVI. The
+    distance between this and `train_rmse_bps` is what the parametric prior is
+    worth; the distance between it and `baseline_ssvi_rmse_bps` is what the
+    network is worth. Defaulted so runs archived before the ablation existed
+    still load."""
+
     def to_json(self) -> dict:
         d = asdict(self)
         d.pop("dir", None)
@@ -88,6 +95,7 @@ def save_run(root: Path, cfg, chain, result, scores) -> RunRecord:
 
     svi = next((s for s in scores if s.name.startswith("SVI")), None)
     ssvi = next((s for s in scores if s.name.startswith("SSVI")), None)
+    flat = next((s for s in scores if "flat prior" in s.name), None)
 
     h = result.history
     record = RunRecord(
@@ -114,6 +122,7 @@ def save_run(root: Path, cfg, chain, result, scores) -> RunRecord:
         baseline_svi_rmse_bps=svi.fit.rmse_vol_bps if svi else None,
         baseline_ssvi_rmse_bps=ssvi.fit.rmse_vol_bps if ssvi else None,
         dir=str(run_dir),
+        ablation_flat_rmse_bps=flat.fit.rmse_vol_bps if flat else None,
     )
     (run_dir / "metrics.json").write_text(
         json.dumps(record.to_json(), indent=2), encoding="utf-8"
@@ -180,4 +189,14 @@ def runs_table(records: list[RunRecord]) -> str:
     lines.append("  gap = val - train RMSE at the selected epoch (smaller and more"
                  " stable generalises better)")
     lines.append("  * = lowest validation error among these runs")
+    if any(r.generalization_gap_bps < 0 for r in ranked):
+        # Validation used to be drawn from the interior of each smile only,
+        # which held out the easy quotes and produced a negative gap. Those runs
+        # are not comparable with later ones on this column, and silently
+        # ranking them first would recommend the wrong checkpoint.
+        lines.append("  !  a negative gap means the run predates the split fix:"
+                     " its validation set excluded")
+        lines.append("     the wings, so its val RMSE is optimistic and not"
+                     " comparable with the rest. Retrain")
+        lines.append("     to rank it fairly.")
     return "\n".join(lines)

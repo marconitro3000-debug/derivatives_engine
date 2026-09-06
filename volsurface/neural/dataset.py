@@ -16,6 +16,16 @@ Stratifying within each expiry -- hold out every n-th strike of every smile --
 tests interpolation across strike while keeping every maturity represented, and
 that is what a surface is used for in practice: pricing a strike that is not
 listed.
+
+The held-out strikes are spread over the **whole** smile, wings included. An
+earlier version of this file drew them from the interior only, on the argument
+that holding out an extreme strike asks the model to extrapolate rather than
+interpolate. That argument is true and the consequence was still wrong: the
+wings are where the fit error lives, so keeping them permanently in the
+training set made the validation RMSE come out *below* the training RMSE and
+turned the reported generalisation gap into an artefact of the split. A
+validation set that systematically excludes the hard points is not measuring
+generalisation.
 """
 
 from __future__ import annotations
@@ -70,6 +80,12 @@ def stratified_split(snapshot, val_fraction: float = 0.2, seed: int = 0
     with too few quotes to spare any are kept entirely in the training set --
     dropping a wing point from a 6-quote smile costs more than the validation
     signal is worth.
+
+    Within an expiry the smile is sorted by strike and cut into ``n_val`` equal
+    blocks, one held-out quote per block, at a random offset drawn once per
+    expiry. That covers the full strike range including both wings, gives every
+    quote the same probability of being held out, and makes a different seed
+    score genuinely different strikes rather than the same ones shifted by one.
     """
     rng = np.random.default_rng(seed)
     train_idx, val_idx = [], []
@@ -80,17 +96,14 @@ def stratified_split(snapshot, val_fraction: float = 0.2, seed: int = 0
         if len(idx) < 6 or n_val == 0:
             train_idx.append(idx)
             continue
-        # Sort by strike and take an evenly spaced subset, so the held-out
-        # points span the whole smile instead of clustering in one wing.
         order = idx[np.argsort(snapshot.k[idx])]
-        picks = np.linspace(1, len(order) - 2, n_val).round().astype(int)
-        picks = np.unique(picks)
-        mask = np.zeros(len(order), dtype=bool)
+        n = len(order)
+        step = n / n_val
+        picks = np.unique(
+            np.clip((rng.random() * step + step * np.arange(n_val)).astype(int), 0, n - 1)
+        )
+        mask = np.zeros(n, dtype=bool)
         mask[picks] = True
-        # Jitter which of the evenly spaced candidates are taken, so repeated
-        # runs with different seeds are not scoring the identical strikes.
-        if rng.random() < 0.5 and len(order) > len(picks) + 1:
-            mask = np.roll(mask, 1)
         val_idx.append(order[mask])
         train_idx.append(order[~mask])
 

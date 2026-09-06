@@ -79,25 +79,32 @@ class NeuralVolSurface(nn.Module, VolSurface):
     overridden to use autograd instead of finite differences.
     """
 
-    name = "Neural (SSVI prior + penalties)"
+    _grad_cache: tuple | None = None      # see `_grads`; one entry, invalidated on weight change
 
     def __init__(self, prior: nn.Module, config: ModelConfig | None = None,
                  feature_mean: np.ndarray | None = None,
                  feature_std: np.ndarray | None = None):
         nn.Module.__init__(self)
         self.config = config or ModelConfig()
-        torch.manual_seed(self.config.seed)
 
         self.prior = prior
         act = _ACTIVATIONS[self.config.activation]
 
-        layers: list[nn.Module] = []
-        in_dim = 5
-        for h in self.config.hidden:
-            layers += [nn.Linear(in_dim, h), act()]
-            in_dim = h
-        layers.append(nn.Linear(in_dim, 1))
-        self.net = nn.Sequential(*layers)
+        # Seed the weight draw reproducibly without touching the caller's RNG:
+        # `nn.Linear` samples at construction, so the seed has to wrap the loop,
+        # and constructing a model should not be a side effect on global state.
+        rng_state = torch.random.get_rng_state()
+        try:
+            torch.manual_seed(self.config.seed)
+            layers: list[nn.Module] = []
+            in_dim = 5
+            for h in self.config.hidden:
+                layers += [nn.Linear(in_dim, h), act()]
+                in_dim = h
+            layers.append(nn.Linear(in_dim, 1))
+            self.net = nn.Sequential(*layers)
+        finally:
+            torch.random.set_rng_state(rng_state)
 
         # Start life *at* the prior: zero the output layer so the correction is
         # exactly 1.0 before the first step. Training then only has to explain
@@ -111,6 +118,13 @@ class NeuralVolSurface(nn.Module, VolSurface):
         self.register_buffer("feature_std", torch.tensor(np.maximum(std, 1e-8),
                                                          dtype=torch.float64))
         self.double()
+        self._grad_cache: tuple | None = None
+
+    @property
+    def name(self) -> str:
+        """Names the prior, so the flat-prior ablation is a distinct table row."""
+        kind = "SSVI prior" if isinstance(self.prior, TorchSSVIPrior) else "flat prior"
+        return f"Neural ({kind} + penalties)"
 
     # -- features -------------------------------------------------------------
 
@@ -168,13 +182,48 @@ class NeuralVolSurface(nn.Module, VolSurface):
     # accept their truncation error when the model is already a torch graph.
 
     def _grads(self, k: np.ndarray, T: np.ndarray):
-        kt, Tt = self._as_tensors(k, T)
+        """``(dw/dk, d2w/dk2, dw/dT)``, memoised on the last ``(k, T)`` asked for.
+
+        One backward pass produces all three, but the `VolSurface` interface
+        exposes them as three separate calls and the diagnostics use all three
+        on the same dense grid -- without the cache that is three identical
+        graph builds for two thrown-away results each time. The cache holds one
+        entry, keyed on the raw bytes of the inputs, and is invalidated whenever
+        the weights change (`_bump_grad_cache` is hooked to `load_state_dict`
+        and to training mode).
+        """
+        k_arr = np.ascontiguousarray(np.asarray(k, dtype=float))
+        T_arr = np.ascontiguousarray(
+            np.broadcast_to(np.asarray(T, dtype=float), k_arr.shape))
+        key = (k_arr.shape, k_arr.tobytes(), T_arr.tobytes())
+
+        if self._grad_cache is not None and self._grad_cache[0] == key:
+            return self._grad_cache[1]
+
+        kt, Tt = self._as_tensors(k_arr, T_arr)
         kt.requires_grad_(True)
         Tt.requires_grad_(True)
         w = self.total_variance_torch(kt, Tt)
         w_k, w_T = torch.autograd.grad(w.sum(), [kt, Tt], create_graph=True)
         w_kk = torch.autograd.grad(w_k.sum(), kt, create_graph=False)[0]
-        return w_k.detach(), w_kk.detach(), w_T.detach()
+
+        out = (w_k.detach(), w_kk.detach(), w_T.detach())
+        self._grad_cache = (key, out)
+        return out
+
+    def _invalidate_grad_cache(self, *_args) -> None:
+        self._grad_cache = None
+
+    def train(self, mode: bool = True):          # noqa: D102 - nn.Module override
+        self._invalidate_grad_cache()
+        return super().train(mode)
+
+    def load_state_dict(self, *args, **kwargs):  # noqa: D102 - nn.Module override
+        self._invalidate_grad_cache()
+        return super().load_state_dict(*args, **kwargs)
+
+    # `h` is accepted and ignored throughout: it is the finite-difference step
+    # of the `VolSurface` base signature, and these derivatives are exact.
 
     def dw_dk(self, k: np.ndarray, T: np.ndarray, h: float = 0.0) -> np.ndarray:
         shape = np.asarray(k, dtype=float).shape

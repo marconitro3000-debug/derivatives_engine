@@ -82,10 +82,21 @@ class CollocationRegion:
         )
 
     def sample(self, n: int, generator: torch.Generator | None = None) -> tuple[Tensor, Tensor]:
-        """Uniform draws over the box, resampled fresh on every call."""
+        """Fresh draws over the box: uniform in ``k``, uniform in ``sqrt(T)``.
+
+        Uniform in ``T`` is the wrong measure. On an eight-expiry chain running
+        out to two years, a uniform draw puts about one point in a hundred below
+        the shortest listed expiry -- and the short end, where total variance is
+        smallest and the smile most curved, is precisely where the density goes
+        negative first. Drawing uniformly in ``sqrt(T)`` gives a density
+        proportional to ``1/sqrt(T)``, which concentrates the constraint where
+        the surface actually bends, at no extra cost. It also matches how the
+        expiries themselves are sampled in `volsurface.chain`.
+        """
         u = torch.rand(n, 2, dtype=torch.float64, generator=generator)
         k = self.k_lo + u[:, 0] * (self.k_hi - self.k_lo)
-        T = self.T_lo + u[:, 1] * (self.T_hi - self.T_lo)
+        root_lo, root_hi = self.T_lo ** 0.5, self.T_hi ** 0.5
+        T = (root_lo + u[:, 1] * (root_hi - root_lo)) ** 2
         return k, T
 
 

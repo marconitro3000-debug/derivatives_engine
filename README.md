@@ -22,7 +22,7 @@ pip install -e .
 python main.py          # or just press Run
 ```
 
-No server, no flags, no arguments. `main.py` asks what you want to do:
+No server, nothing to configure. `main.py` asks what you want to do:
 
 ```
   [1]  Train a surface        fit a chain, score it, plot everything
@@ -31,6 +31,8 @@ No server, no flags, no arguments. `main.py` asks what you want to do:
                               (instant, no network)
   [3]  Compare trained models which archived run to use, and why
                               (instant, no network)
+  [4]  Sweep architectures    is the network too small? fit several sizes
+                              on one chain and table the answer
 ```
 
 Then which underlying — **Train** takes any symbol typed on the spot, fetched
@@ -48,34 +50,65 @@ validation error and generalisation gap, so after a few experiments there is an
 answer to "which checkpoint do I actually use" instead of a folder of
 `.pt` files to guess between.
 
+Every option is also a command. `python main.py --help` generates the flag list
+from [`config.py`](config.py) itself, so there is no second list to drift:
+
+```bash
+python main.py train --ticker AAPL --hidden 256x4 --epochs 3000
+python main.py sweep --sweep-seeds 3          # the capacity study
+python main.py train --chain-file results/spy_chain.npz --no-run-baselines
+```
+
 Settings live in [`config.py`](config.py); set `mode = "train"` and `ticker`
 there to skip both prompts for a scheduled run.
 
 📓 **[`notebook.ipynb`](notebook.ipynb)** — the same study written as a paper,
 every claim backed by a runnable cell, committed with its outputs so it renders
 in full on GitHub.
-📘 **[`docs/USAGE.md`](docs/USAGE.md)** — commands, the Jupyter workflow, the
-full API, every config knob, troubleshooting.
+📘 **[`docs/USAGE.md`](docs/USAGE.md)** — the Jupyter workflow, the full API,
+every config knob, troubleshooting.
+⌨️ **[`docs/COMMANDS.md`](docs/COMMANDS.md)** — every runnable command in the
+repo and what each one does: the four modes, all their flags, the tests, the
+notebook, and recipes.
+🧠 **[`docs/RED_NEURONAL.md`](docs/RED_NEURONAL.md)** — the network itself: what
+it is, why it is small on purpose, and the design decisions behind it
+(in Spanish).
 
 ---
 
 ## Result
 
-Live SPY chain, 1,387 quotes across 8 expiries from 8 days to 1.8 years.
+Live SPY chain, 1,460 quotes across 8 expiries from 13 days to 1.8 years.
 Every surface is scored by identical code:
 
 ```
 surface                              IV RMSE   max err   px RMSE  in spread  cal viol  bfly viol
 ------------------------------------------------------------------------------------------------
-Neural (SSVI prior + penalties)        24.4bp    673.7bp    0.3291      15.4%     0.00%      0.00%
-SVI (per-slice)                        47.5bp    637.4bp    0.6020       5.9%     0.00%      0.04%
-SSVI (joint)                          105.8bp    828.5bp    1.0837       2.6%     0.00%      0.00%
+Neural (SSVI prior + penalties)        40.8bp    648.3bp    0.3782      12.3%     0.00%      0.01%
+Neural (flat prior + penalties)       685.2bp   4473.4bp    2.2550       1.2%     0.00%      0.09%
+SVI (per-slice)                        65.6bp    652.3bp    0.6533       6.4%     0.00%      0.04%
+SSVI (joint)                          142.2bp   1450.0bp    1.0403       2.3%     0.00%      0.00%
 ```
 
-The neural surface fits **1.9× closer than per-slice SVI and 4.3× closer than
-SSVI** in vol space, is the best of the three in price space, and is free of
-static arbitrage everywhere on this run — including where SVI (0.04%) is not.
-Full run in [`docs/example_report.txt`](docs/example_report.txt).
+The neural surface fits **1.6× closer than per-slice SVI and 3.5× closer than
+SSVI** in vol space and is the best of the three in price space. On the dense
+grid it leaves a single point of 7,381 with a shallow butterfly dent
+(`g = −1.4e−2`, at `T = 0.018y` — half the shortest listed expiry, deep in
+maturity extrapolation); per-slice SVI leaves three, inside the quoted range.
+Raising the butterfly weight shrinks that dent without removing it, at a cost of
+a few tenths of a basis point on the fit, so the default stays where it is and
+the number is reported rather than tuned away.
+
+The second row is the ablation, and it is the one to read first: **the same
+network, same budget, same penalties, against a flat constant-vol prior instead
+of SSVI — 685bp.** The bounded parametrisation `w = w_prior·[1 + α·tanh(net)]`
+with `α = 0.35` presupposes a prior that is already roughly right; a ±35%
+correction around a constant cannot represent a smile at all. What the headline
+number measures is the prior and the network *together*, and that is the honest
+way to state it.
+
+Full run in [`docs/example_report.txt`](docs/example_report.txt); the network
+itself is documented in [`docs/RED_NEURONAL.md`](docs/RED_NEURONAL.md).
 
 ![smiles](docs/figures/smiles.png)
 
@@ -86,10 +119,50 @@ constraints are actually binding:
 
 ![training curves](docs/figures/training.png)
 
-Validation error sitting below training and a generalisation gap that flattens
-rather than widens is what "this will hold up on tomorrow's chain" looks like;
-the third panel is the constraints crossing into compliance during warm-up and
-staying there while the fit keeps improving.
+The held-out strikes span the whole smile, wings included, so validation sits a
+little *above* training — 45.3bp against 39.6bp. A gap that size and flat is
+what "this will hold up on tomorrow's chain" looks like; validation below
+training would mean the split was quietly holding out only the easy points. The
+third panel is the constraints crossing into compliance during warm-up and
+staying there while the fit keeps improving, and the epoch that gets shipped is
+the best one that was *clean* on its own collocation draw, not merely the best
+one.
+
+### Is the network too small?
+
+8,769 parameters is a small network, and "make it bigger" is the first thing
+anyone says. `python main.py sweep` answers it with a number instead of an
+opinion. The table below is 18 fits — six architectures, three seeds, all on the
+same chain, same split, same budget, same penalties:
+
+```bash
+python main.py sweep --sweep-architectures 32x2,64x3,128x3,256x4,512x4,1024x4 \
+                     --sweep-seeds 3 --chain-file results/spy_chain.npz
+```
+
+```
+    arch     params     train       val  vs default    bfly     time
+    32x2      1,281     39.5bp     45.2bp     +0.8bp   0.02%      56s
+    64x3      8,769     38.7bp     44.4bp        --    0.01%      75s
+   128x3     33,921     37.6bp     43.5bp     -0.9bp   0.02%     132s
+   256x4    199,169     38.3bp     44.0bp     -0.4bp   0.02%    ~370s
+   512x4    791,553     36.7bp     42.6bp     -1.8bp   0.02%   ~1230s
+  1024x4  3,155,969     36.5bp     42.3bp     -2.1bp   0.03%   ~3100s
+```
+
+**360× the parameters buys 2.1bp — 4.7% — for ~40× the training time**, and
+seed-to-seed scatter within one architecture is 1–4bp, so most of that column is
+noise. Training error barely moves either (39.5 → 36.5bp while parameters go up
+2,500×), which is the signature of a problem where the model is not the binding
+constraint: the chain carries a few dozen effective degrees of freedom and the
+error floor is the bid-ask. Arbitrage violations get marginally *worse* with
+capacity, because a bigger network has more ways to bend the surface where no
+quote is holding it down.
+
+![capacity vs error](docs/figures/sweep.png)
+
+The default stays at 64×3. `--hidden 512x4` is one flag away if you want the
+other end of that curve.
 
 ![arbitrage map](docs/figures/arbitrage_neural.png)
 
@@ -127,17 +200,17 @@ SPY options are **American**. A European inversion has nowhere to put the
 early-exercise premium and charges it to volatility. Measured on the chain above:
 
 ```
-removed 15.14bp of vol on average (median 2.94, p95 71.23, max 274.22)
-  calls   0.00bp mean   puts  24.02bp mean
-  T in [0.00, 0.15)  n= 250  mean   0.95bp  p95   3.96bp
-  T in [0.15, 0.50)  n= 381  mean  10.44bp  p95  35.91bp
-  T in [0.50, 1.00)  n= 170  mean  11.51bp  p95  54.87bp
-  T >= 1.00          n= 586  mean  25.30bp  p95 122.98bp
+removed 13.26bp of vol on average (median 0.47, p95 65.65, max 280.21)
+  calls   0.16bp mean   puts  20.27bp mean
+  T in [0.00, 0.15)  n= 406  mean   0.36bp  p95   1.85bp
+  T in [0.15, 0.50)  n= 308  mean   9.49bp  p95  36.15bp
+  T in [0.50, 1.00)  n= 165  mean  10.76bp  p95  50.49bp
+  T >= 1.00          n= 581  mean  24.98bp  p95 119.12bp
 ```
 
 Exactly where theory says it should be: nothing in the calls, everything in the
-puts, growing with maturity. Against a fit measured at 24bp, ignoring it would
-have been a bias larger than the thing being fitted.
+puts, growing with maturity. Against a fit measured at 41bp, ignoring it would
+have been a bias of the same order as the thing being fitted.
 
 So the quotes are **de-Americanised** before they reach the surface. The premium
 is priced on a binomial lattice and stripped out:
@@ -238,8 +311,8 @@ volsurface/
         model.py           prior x bounded correction
         arbitrage.py       autodiff penalties on collocation points
         dataset.py         tensors and the stratified split
-        train.py           vega-weighted objective, penalty warm-up, early stopping
-tests/                     72 tests, no network required
+        train.py           vega-weighted objective, penalty warm-up, feasible-epoch selection
+tests/                     100 tests, no network required
 ```
 
 ## Using it as a library

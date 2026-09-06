@@ -3,6 +3,10 @@
 Everything you can do with this repo: commands, the Jupyter workflow, the full
 Python API, every configuration knob, and what to do when something breaks.
 
+> Looking for the command list specifically — every mode, every flag, every
+> script, with a one-line description of each? That is
+> **[`COMMANDS.md`](COMMANDS.md)**. This file is the longer-form reference.
+
 - [Install](#install)
 - [Running the study](#running-the-study)
 - [Jupyter](#jupyter)
@@ -42,13 +46,26 @@ pip install jupyter
 python main.py
 ```
 
-No arguments, no flags, no server. It asks what to do:
+No server, nothing to configure. It asks what to do:
 
 ```
   [1]  Train a surface        fit a chain, score it, plot everything
   [2]  Price off a surface    query the one trained last time
   [3]  Compare trained models which archived run to use, and why
+  [4]  Sweep architectures    is the network too small? fit several sizes
+                              on one chain and table the answer
 ```
+
+Every one of those is also a command, and every knob below is also a flag —
+generated from `RunConfig` by [`cli.py`](../cli.py), so the two cannot drift:
+
+```bash
+python main.py --help                    # the whole list
+python main.py train --ticker AAPL       # a mode, no prompts
+python main.py sweep --sweep-seeds 3     # the capacity study
+```
+
+See [`COMMANDS.md`](COMMANDS.md) for the flag-by-flag reference and recipes.
 
 Then which underlying:
 
@@ -76,8 +93,8 @@ committed at `.vscode/launch.json`. Set `mode` in `config.py` to `"train"`,
    loudly, if the network is unavailable)
 2. de-Americanises the quotes on a binomial lattice
 3. calibrates per-slice SVI and joint SSVI
-4. trains the neural surface
-5. scores all three on fit **and** on static arbitrage
+4. trains the neural surface, and again against a flat prior (the ablation)
+5. scores all four on fit **and** on static arbitrage
 6. writes the report and figures to `results/`, and **archives** the run to
    `models/<ticker>_<timestamp>/`
 
@@ -95,7 +112,8 @@ Two output locations, on purpose:
 | `report.txt` | the full run, identical to what was printed |
 | `training.png` | fit, generalisation gap, constraint and penalty curves — see below |
 | `smiles.png` | market smiles per expiry with every surface overlaid |
-| `arbitrage_neural.png` / `_svi.png` / `_ssvi.png` | Durrleman `g` and `dw/dT` maps, one per surface |
+| `arbitrage_neural_ssvi.png` / `_neural_flat.png` / `_svi.png` / `_ssvi.png` | Durrleman `g` and `dw/dT` maps, one per surface |
+| `sweep.txt`, `sweep.png`, `<ticker>_sweep_chain.npz` | written by mode [4], if run |
 | `<ticker>_surface.pt`, `<ticker>_chain.npz` | the model and the chain it was fitted to — both needed to price |
 | `model_comparison.png` | written by mode [3], if run |
 
@@ -109,10 +127,10 @@ whatever you want to keep.
 Four panels, in the order you should read them:
 
 1. **Fit error** — train and validation IV RMSE, with the epoch actually
-   selected marked. Validation sitting *below* training here is normal, not a
-   bug: the held-out points are interior strikes of a smile that is already
-   heavily constrained by its neighbours, and the vega weighting defining the
-   error is renormalised separately within each split.
+   selected marked. The held-out strikes span the whole smile, wings included,
+   so validation sits a little *above* training; validation *below* training is
+   the signature of a split quietly holding out only the easy points, which is
+   what this one used to do.
 2. **Generalisation gap** — `val − train`, filled. Flat and small says the fit
    will hold up on a chain it has not seen; widening over epochs is the
    network starting to fit the training strikes at the validation strikes'
@@ -150,6 +168,23 @@ checkpoints should mode [2] actually use", after which you copy that run's
 Optionally plots a bar-chart comparison (`model_comparison.png`) and, on
 request, an overlay of the validation curves for up to six runs.
 
+### [4] Sweep
+
+Fits several architectures to **one** chain — same split, same budget, same
+seed, same penalties — and tables validation error against parameter count. It
+exists so "is the network too small?" gets answered with a curve instead of an
+opinion. Writes `sweep.txt`, `sweep.png` and the exact chain every arm saw, so
+any arm can be replayed with `--chain-file`.
+
+```bash
+python main.py sweep
+python main.py sweep --sweep-architectures 64x3,256x4,1024x4 --sweep-seeds 3
+```
+
+The split is pinned across arms and seeds: letting the seed move it too makes
+the seeds incomparable, and that scatter is larger than the architecture effect
+being measured.
+
 ### Typical runtime
 
 | step | time |
@@ -160,9 +195,15 @@ request, an overlay of the validation curves for up to six runs.
 | figures | ~15 s |
 | **total (train)** | **~3 min** |
 | price / compare | instant — no network, no training |
+| sweep, 6 architectures x 3 seeds | ~40 min (once, on a cached chain) |
 
-To iterate faster set `epochs = 400` and `run_baselines = False` in
-`config.py` — that gets a train run under 30 seconds.
+To iterate faster, either set `epochs = 400` and `run_baselines = False` in
+`config.py`, or say the same thing on the command line and skip the download
+entirely:
+
+```bash
+python main.py train --chain-file results/spy_chain.npz --epochs 400                      --no-run-baselines --no-run-prior-ablation
+```
 
 ---
 
@@ -236,6 +277,7 @@ file rather than by remembering which flags were passed.
 |---|---|---|
 | `ticker` | `"SPY"` | underlying. Liquid ETFs and large caps work; illiquid names will not survive the quote filters. |
 | `use_live_data` | `True` | `False` uses a chain generated from a known arbitrage-free SSVI surface. |
+| `chain_file` | `None` | fit an already-downloaded `*_chain.npz` instead of fetching. Overrides `use_live_data`, and is what makes an experiment reproducible: every arm of a sweep has to see the same quotes, and two downloads a minute apart do not. |
 | `max_expiries` | `8` | expiries are sampled evenly in `sqrt(T)` across the whole listed term structure, not taken from the front. |
 | `min_maturity_years` | `0.02` | ~1 week. Shorter is dominated by tick size. |
 | `max_maturity_years` | `2.0` | longer barely trades. |
@@ -281,7 +323,15 @@ the fit where no violation is at stake.
 | `make_plots` | `True` | writes `training.png`, `smiles.png`, one `arbitrage_*.png` per surface. |
 | `save_model` | `True` | also controls whether the run is archived to `models_dir`. |
 | `run_baselines` | `True` | SVI calibration is the slowest step; it is also the point of the comparison. |
+| `run_prior_ablation` | `True` | retrain the same network against a flat constant-vol prior and add it to the scorecard — the experiment that says how much of the result is the prior and how much is the network. Costs a second training run. |
 | `verbose` | `True` | print the training log. |
+
+### Capacity sweep (mode `"sweep"`)
+
+| setting | default | meaning |
+|---|---|---|
+| `sweep_architectures` | `("32x2","64x3","128x3","256x4","512x4")` | architectures to fit, as `WIDTHxDEPTH`, all on the same chain with the same budget. |
+| `sweep_seeds` | `1` | seeds per architecture. One shows the shape of the curve; three is what you want before claiming two architectures differ, since run-to-run scatter on a real chain is a few basis points. The split is pinned across seeds, so only the model moves. |
 
 ### Pricing (mode `"price"`, non-interactive only)
 
@@ -460,7 +510,7 @@ px = DF * vs.price(F, strike, T, 0.0, sigma, "call")   # S=F, r=0 is the forward
 ## Tests
 
 ```bash
-pytest                              # 72 tests, no network required
+pytest                              # 100 tests, no network required
 pytest tests/test_marketdata.py     # one module
 pytest -k de_americanis             # one topic
 pytest -x -q                        # stop at the first failure

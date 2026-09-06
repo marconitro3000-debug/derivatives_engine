@@ -69,6 +69,7 @@ from .report import (
     plot_model_comparison,
     plot_quote,
     plot_training,
+    worst_quote_notes,
 )
 from .registry import RunRecord, list_runs, load_history, load_run, runs_table, save_run
 from .surface import VolSurface
@@ -90,7 +91,7 @@ __all__ = [
     "TrainConfig", "TrainResult", "PenaltyWeights", "train_surface",
     # scoring
     "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage",
-    "evaluate_surface", "compare", "comparison_table",
+    "evaluate_surface", "compare", "comparison_table", "worst_quote_notes",
     "plot_fit", "plot_arbitrage_map", "plot_training", "plot_quote", "plot_model_comparison",
     # registry
     "RunRecord", "save_run", "list_runs", "load_run", "load_history", "runs_table",

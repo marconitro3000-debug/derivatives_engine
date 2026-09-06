@@ -16,12 +16,25 @@ Training takes about three minutes; pricing is instant, which is the whole
 reason the two are separate. A desk calibrates on a schedule and prices on every
 request, and this is the same split.
 
-No command-line arguments. Defaults live in `config.py`; set `mode` there to
-"train" or "price" to skip the menu entirely.
+    [3] COMPARE rank every archived run by validation error, so "which
+                checkpoint do I use" has an answer.
+
+    [4] SWEEP   fit several architectures to one chain and table capacity
+                against error -- the experiment, not the argument.
+
+Training takes a few minutes; pricing is instant, which is the whole reason the
+two are separate. A desk calibrates on a schedule and prices on every request,
+and this is the same split.
+
+Defaults live in `config.py`. Every one of them is also a command-line flag --
+`python main.py --help` generates the list from the dataclass, and
+`docs/COMMANDS.md` documents every command in the repo, this file included.
+Run with no arguments and you get the menu, exactly as before.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 import time
 from pathlib import Path
@@ -38,6 +51,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 import numpy as np
 
+from cli import config_from_args, parse_layers
 from config import CONFIG, RunConfig
 from volsurface import (
     ChainSnapshot,
@@ -47,6 +61,7 @@ from volsurface import (
     TrainConfig,
     compare,
     comparison_table,
+    evaluate_surface,
     fetch_chain,
     greeks,
     list_runs,
@@ -62,6 +77,7 @@ from volsurface import (
     save_run,
     synthetic_snapshot,
     train_surface,
+    worst_quote_notes,
 )
 from volsurface.diagnostics import butterfly_g
 
@@ -131,7 +147,7 @@ def ask_float(prompt: str, default: float | None = None) -> float | None:
 
 def choose_mode(cfg: RunConfig) -> str:
     """Menu, unless `config.mode` already decided or nobody is listening."""
-    if cfg.mode in ("train", "price", "compare"):
+    if cfg.mode in ("train", "price", "compare", "sweep"):
         return cfg.mode
     if not interactive():
         return "train"
@@ -146,11 +162,17 @@ def choose_mode(cfg: RunConfig) -> str:
     print("                              (instant, no network)")
     print("  [3]  Compare trained models which archived run to use, and why")
     print("                              (instant, no network)")
+    print("  [4]  Sweep architectures    is the network too small? fit several")
+    print("                              sizes on one chain and table the answer")
+    print()
+    print("  (everything here is also a command: python main.py --help,")
+    print("   full reference in docs/COMMANDS.md)")
     print()
     choice = ask("  choose [1]: ", "1")
     return {
         "2": "price", "price": "price", "p": "price",
         "3": "compare", "compare": "compare", "c": "compare",
+        "4": "sweep", "sweep": "sweep", "s": "sweep",
     }.get(choice.lower(), "train")
 
 
@@ -226,6 +248,12 @@ def load_chain(cfg: RunConfig, say):
         de_americanize=cfg.de_americanize,
         lattice_steps=cfg.lattice_steps,
     )
+
+    if cfg.chain_file is not None:
+        chain = ChainSnapshot.load(cfg.chain_file)
+        cfg.ticker = chain.ticker
+        say(f"source   cached chain {cfg.chain_file}  (as of {chain.asof})")
+        return chain, True
 
     if cfg.use_live_data:
         try:
@@ -308,18 +336,33 @@ def run_train(cfg: RunConfig) -> int:
         result = train_surface(chain, build_train_config(cfg))
         say(result.summary())
 
+        # The ablation: same network, same penalties, same budget, but starting
+        # from a constant-vol prior instead of SSVI. It is the only honest way
+        # to say how much of the headline number the network earned.
+        ablation = None
+        if cfg.run_prior_ablation:
+            say()
+            say("  ablation: same network against a flat constant-vol prior")
+            ablation = train_surface(chain, build_train_config(cfg), prior="flat")
+            say("  " + ablation.summary().replace("\n", "\n  "))
+
         # 3 ── score ---------------------------------------------------------
         say()
         say(rule("3/4  scorecard"))
-        scores = compare(chain, result, include_baselines=cfg.run_baselines)
+        scores = compare(chain, result, include_baselines=cfg.run_baselines,
+                         extra_surfaces=(ablation.model,) if ablation else ())
         say(comparison_table(scores))
         say()
         say("  IV RMSE     vega-weighted implied-vol error against the quotes")
-        say("  max err     worst single-quote vol error")
+        say("  max err     worst single-quote vol error (located below)")
         say("  px RMSE     the same fit measured in price space")
         say("  in spread   share of quotes re-priced inside the bid-ask")
         say("  cal viol  ) share of a dense (k,T) grid - extending past the quoted")
         say("  bfly viol ) strikes - that admits calendar / butterfly arbitrage")
+        say()
+        say(worst_quote_notes(scores))
+        say("  (a large error at a weight near zero is the vega/spread weighting"
+            " declining to chase a wing quote)")
 
         # 4 ── artefacts -----------------------------------------------------
         say()
@@ -339,7 +382,12 @@ def run_train(cfg: RunConfig) -> int:
             say(f"  curves   {plot_training(result, str(cfg.output_dir / 'training.png'), show)}")
             say(f"  smiles   {plot_fit(chain, [s.surface for s in scores], str(cfg.output_dir / 'smiles.png'), show=show)}")
             for score in scores:
-                slug = score.name.split()[0].lower()
+                # "Neural (flat prior + penalties)" -> neural_flat: the first
+                # word alone would collide with the SSVI-prior run's map.
+                words = score.name.replace("(", " ").split()
+                slug = words[0].lower()
+                if slug == "neural":
+                    slug += "_" + words[1].lower()      # ssvi / flat
                 out = cfg.output_dir / f"arbitrage_{slug}.png"
                 say(f"  arb map  {plot_arbitrage_map(score.surface, chain, str(out), show)}")
 
@@ -358,6 +406,195 @@ def run_train(cfg: RunConfig) -> int:
 
     finally:
         say.close()
+
+
+# ── mode 4: sweep ────────────────────────────────────────────────────────────
+
+def run_sweep(cfg: RunConfig) -> int:
+    """Fit several architectures to one chain and table the result.
+
+    The question this exists to settle is "is the network too small?", and it is
+    not a question anyone should answer by reasoning about it. Every arm sees
+    the same quotes, the same split, the same budget, the same seed and the same
+    penalties; the only thing that changes is the shape of `net`. What comes out
+    is validation error against parameter count, which is the curve that decides
+    whether capacity is the binding constraint or whether the bid-ask is.
+
+    The chain is fetched once and reused across arms. Fitting each arm to its
+    own freshly downloaded chain would confound architecture with whatever the
+    market did in the intervening minutes -- on a live chain that is easily
+    larger than the effect being measured.
+    """
+    from volsurface.neural.model import ModelConfig
+
+    t0 = time.time()
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    say = Tee(cfg.output_dir / "sweep.txt")
+
+    try:
+        say(rule())
+        say(f"  SWEEP  |  {cfg.ticker}")
+        say(rule())
+        say()
+        say(rule("1/3  option chain"))
+        chain, _ = load_chain(cfg, say)
+        say(chain.summary())
+
+        if len(chain.forwards) < 2:
+            say("\nNeed at least two expiries to fit a surface. Stopping.")
+            return 1
+
+        # Every arm reuses these quotes. Saving them makes the whole sweep
+        # replayable with --chain-file, which is the difference between an
+        # experiment and an anecdote.
+        chain_path = cfg.output_dir / f"{cfg.ticker.lower()}_sweep_chain.npz"
+        chain.save(chain_path)
+
+        say()
+        say(rule("2/3  fitting each architecture"))
+        say(f"  {len(cfg.sweep_architectures)} architectures x {cfg.sweep_seeds} seed(s), "
+            f"{cfg.epochs} epochs each, identical chain and split")
+        say()
+
+        rows = []
+        for spec in cfg.sweep_architectures:
+            hidden = parse_layers(spec)
+            for seed in range(cfg.sweep_seeds):
+                arm = dataclasses.replace(cfg, hidden_layers=hidden, seed=seed,
+                                          verbose=False)
+                train_cfg = build_train_config(arm)
+                train_cfg.log_every = 0
+                # Same held-out quotes in every arm and every seed. Letting the
+                # seed move the split too makes the seeds incomparable: the
+                # scatter that produces is larger than the architecture effect
+                # the sweep exists to measure.
+                train_cfg.split_seed = cfg.seed
+                result = train_surface(chain, train_cfg)
+                score = evaluate_surface(result.model, chain)
+                n_params = sum(p.numel() for p in result.model.net.parameters())
+                rows.append({
+                    "spec": spec, "seed": seed, "params": n_params,
+                    "train": result.history["train_rmse_bps"][result.best_epoch],
+                    "val": result.best_val_rmse_bps,
+                    "chain": score.fit.rmse_vol_bps,
+                    "bfly": score.arb.butterfly_pct,
+                    "cal": score.arb.calendar_pct,
+                    "feasible": result.best_is_feasible,
+                    "secs": result.elapsed_sec,
+                })
+                say(f"  {spec:>7}  {n_params:>9,d} params  "
+                    f"seed {seed}  train {rows[-1]['train']:6.1f}bp  "
+                    f"val {rows[-1]['val']:6.1f}bp  "
+                    f"bfly {rows[-1]['bfly']:5.2f}%  {rows[-1]['secs']:5.1f}s")
+
+        say()
+        say(rule("3/3  capacity vs error"))
+        say(sweep_table(rows, cfg))
+
+        if cfg.make_plots:
+            path = plot_capacity(rows, str(cfg.output_dir / "sweep.png"),
+                                 cfg.show_plots and interactive())
+            say(f"\n  curve    {path}")
+        say(f"  chain    {chain_path}")
+        say(f"           (replay any arm with --chain-file {chain_path})")
+        say(f"  report   {cfg.output_dir / 'sweep.txt'}")
+
+        say()
+        say(rule())
+        say(f"  done in {time.time() - t0:.1f}s")
+        say(rule())
+        return 0
+    finally:
+        say.close()
+
+
+def sweep_table(rows: list[dict], cfg: RunConfig) -> str:
+    """The sweep as a table, with the smallest architecture as the reference.
+
+    Reported against the *baseline* rather than in isolation, because the number
+    that matters is not "512x4 scores X" but "512x4 buys you X basis points over
+    the default for Y times the parameters".
+    """
+    import numpy as np
+
+    by_spec: dict[str, list[dict]] = {}
+    for r in rows:
+        by_spec.setdefault(r["spec"], []).append(r)
+
+    default_spec = next((s for s in by_spec
+                         if parse_layers(s) == tuple(CONFIG.hidden_layers)), None)
+    ref = float(np.mean([r["val"] for r in by_spec[default_spec]])) if default_spec \
+        else min(float(np.mean([r["val"] for r in v])) for v in by_spec.values())
+
+    header = (f"{'arch':>8} {'params':>10} {'train':>9} {'val':>9} {'chain':>9} "
+              f"{'vs default':>11} {'cal':>7} {'bfly':>7} {'clean':>6} {'time':>7}")
+    lines = [header, "-" * len(header)]
+    for spec, group in by_spec.items():
+        val = float(np.mean([r["val"] for r in group]))
+        lines.append(
+            f"{spec:>8} {group[0]['params']:>10,d} "
+            f"{np.mean([r['train'] for r in group]):>8.1f}bp "
+            f"{val:>8.1f}bp "
+            f"{np.mean([r['chain'] for r in group]):>8.1f}bp "
+            f"{val - ref:>+10.1f}bp "
+            f"{np.mean([r['cal'] for r in group]):>6.2f}% "
+            f"{np.mean([r['bfly'] for r in group]):>6.2f}% "
+            f"{sum(r['feasible'] for r in group):>3}/{len(group):<2} "
+            f"{np.mean([r['secs'] for r in group]):>6.1f}s"
+        )
+
+    lines += [
+        "",
+        "  train / val   vega-weighted IV RMSE at the selected epoch",
+        "  chain         the same error over every quote, train and validation",
+        "  vs default    validation error relative to the configured architecture;",
+        "                negative means the bigger network actually bought something",
+        "  cal / bfly    share of a dense (k,T) grid admitting arbitrage",
+        "  clean         arms whose selected epoch was arbitrage-free on its own draw",
+    ]
+    return "\n".join(lines)
+
+
+def plot_capacity(rows: list[dict], path: str | None = None, show: bool = False):
+    """Validation error against parameter count, log x."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    by_spec: dict[str, list[dict]] = {}
+    for r in rows:
+        by_spec.setdefault(r["spec"], []).append(r)
+
+    specs = list(by_spec)
+    params = np.array([by_spec[s][0]["params"] for s in specs], dtype=float)
+    val = np.array([np.mean([r["val"] for r in by_spec[s]]) for s in specs])
+    train = np.array([np.mean([r["train"] for r in by_spec[s]]) for s in specs])
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    ax.plot(params, train, "o-", lw=1.3, ms=4, label="train")
+    ax.plot(params, val, "o-", lw=1.6, ms=5, label="validation")
+    for x, y, s in zip(params, val, specs):
+        ax.annotate(s, (x, y), textcoords="offset points", xytext=(0, 7),
+                    ha="center", fontsize=8)
+    ax.set_xscale("log")
+    ax.set_xlabel("trainable parameters in the correction network")
+    ax.set_ylabel("IV RMSE (bp)")
+    ax.set_title("Capacity vs error — same chain, same budget, same split")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    return _finish_local(fig, path, show)
+
+
+def _finish_local(fig, path, show):
+    if path:
+        fig.savefig(path, dpi=150)
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show()
+    else:
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+    return path if path else fig
 
 
 # ── mode 3: compare ──────────────────────────────────────────────────────────
@@ -587,9 +824,14 @@ def run_price(cfg: RunConfig) -> int:
 
 # ── entry point ──────────────────────────────────────────────────────────────
 
-def main(cfg: RunConfig = CONFIG) -> int:
+def main(cfg: RunConfig | None = None) -> int:
+    # Command-line arguments win over `config.py`, and `config.py` wins over
+    # nothing -- with neither, the menu asks.
+    if cfg is None:
+        cfg, _ = config_from_args()
     mode = choose_mode(cfg)
-    cfg.ticker = choose_ticker(cfg, mode)
+    if cfg.chain_file is None:
+        cfg.ticker = choose_ticker(cfg, mode)
 
     # Pick the backend once, before anything imports pyplot: an interactive run
     # wants windows, a scripted one must not block waiting for someone to close
@@ -602,6 +844,8 @@ def main(cfg: RunConfig = CONFIG) -> int:
         return run_price(cfg)
     if mode == "compare":
         return run_compare(cfg)
+    if mode == "sweep":
+        return run_sweep(cfg)
     return run_train(cfg)
 
 

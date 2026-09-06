@@ -1,0 +1,57 @@
+============================================================================================
+  SWEEP  |  SPY
+============================================================================================
+
+-- 1/3  option chain -----------------------------------------------------------------------
+source   cached chain results\spy_chain.npz  (as of 2026-09-05)
+SPY @ 2026-09-05  spot=770.19
+  1460 quotes across 8 expiries (0.036y - 1.781y)
+  k range [-0.997, +0.595]  IV range [9.7%, 66.2%]
+
+-- 2/3  fitting each architecture ----------------------------------------------------------
+  6 architectures x 3 seed(s), 1500 epochs each, identical chain and split
+
+     32x2      1,281 params  seed 0  train   39.8bp  val   45.4bp  bfly  0.01%   52.0s
+     32x2      1,281 params  seed 1  train   38.7bp  val   44.6bp  bfly  0.03%   65.2s
+     32x2      1,281 params  seed 2  train   40.0bp  val   45.6bp  bfly  0.01%   49.1s
+     64x3      8,769 params  seed 0  train   39.6bp  val   45.3bp  bfly  0.01%   86.3s
+     64x3      8,769 params  seed 1  train   40.1bp  val   45.8bp  bfly  0.01%   75.5s
+     64x3      8,769 params  seed 2  train   36.2bp  val   42.1bp  bfly  0.01%   64.6s
+    128x3     33,921 params  seed 0  train   36.4bp  val   42.4bp  bfly  0.03%  116.2s
+    128x3     33,921 params  seed 1  train   37.7bp  val   43.8bp  bfly  0.01%  136.9s
+    128x3     33,921 params  seed 2  train   38.7bp  val   44.4bp  bfly  0.01%  142.8s
+    256x4    199,169 params  seed 0  train   38.5bp  val   44.1bp  bfly  0.03%  42765.4s
+    256x4    199,169 params  seed 1  train   36.9bp  val   43.2bp  bfly  0.01%  385.6s
+    256x4    199,169 params  seed 2  train   39.5bp  val   44.8bp  bfly  0.01%  362.8s
+    512x4    791,553 params  seed 0  train   36.7bp  val   43.0bp  bfly  0.03%  1146.3s
+    512x4    791,553 params  seed 1  train   36.6bp  val   42.6bp  bfly  0.03%  1080.3s
+    512x4    791,553 params  seed 2  train   36.8bp  val   42.3bp  bfly  0.01%  1471.5s
+   1024x4  3,155,969 params  seed 0  train   36.5bp  val   42.3bp  bfly  0.03%  3123.4s
+   1024x4  3,155,969 params  seed 1  train   36.6bp  val   42.4bp  bfly  0.03%  3030.1s
+   1024x4  3,155,969 params  seed 2  train   36.4bp  val   42.4bp  bfly  0.03%  8111.2s
+
+-- 3/3  capacity vs error ------------------------------------------------------------------
+    arch     params     train       val     chain  vs default     cal    bfly  clean    time
+--------------------------------------------------------------------------------------------
+    32x2      1,281     39.5bp     45.2bp     40.7bp       +0.8bp   0.00%   0.02%   3/3    55.5s
+    64x3      8,769     38.7bp     44.4bp     39.9bp       +0.0bp   0.01%   0.01%   3/3    75.4s
+   128x3     33,921     37.6bp     43.5bp     38.9bp       -0.9bp   0.02%   0.02%   3/3   132.0s
+   256x4    199,169     38.3bp     44.0bp     39.5bp       -0.4bp   0.00%   0.02%   3/3  14504.6s
+   512x4    791,553     36.7bp     42.6bp     38.0bp       -1.8bp   0.00%   0.02%   3/3  1232.7s
+  1024x4  3,155,969     36.5bp     42.3bp     37.7bp       -2.1bp   0.00%   0.03%   3/3  4754.9s
+
+  train / val   vega-weighted IV RMSE at the selected epoch
+  chain         the same error over every quote, train and validation
+  vs default    validation error relative to the configured architecture;
+                negative means the bigger network actually bought something
+  cal / bfly    share of a dense (k,T) grid admitting arbitrage
+  clean         arms whose selected epoch was arbitrage-free on its own draw
+
+  curve    results\sweep.png
+  chain    results\spy_sweep_chain.npz
+           (replay any arm with --chain-file results\spy_sweep_chain.npz)
+  report   results\sweep.txt
+
+============================================================================================
+  done in 62281.6s
+============================================================================================

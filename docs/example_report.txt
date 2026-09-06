@@ -4,53 +4,69 @@
 
 -- 1/4  option chain -----------------------------------------------------------------------
 source   live option chain (Yahoo Finance)
-SPY @ 2026-09-03  spot=773.67
-  1387 quotes across 8 expiries (0.022y - 1.786y)
-  k range [-0.999, +0.597]  IV range [8.9%, 51.0%]
+SPY @ 2026-09-05  spot=770.19
+  1460 quotes across 8 expiries (0.036y - 1.781y)
+  k range [-0.997, +0.595]  IV range [9.7%, 66.2%]
 
   american exercise:
-  removed 15.14bp of vol on average (median 2.94, p95 71.23, max 274.22)
-    calls   0.00bp mean   puts  24.02bp mean
-    T in [0.00, 0.15)  n= 250  mean   0.95bp  p95   3.96bp
-    T in [0.15, 0.50)  n= 381  mean  10.44bp  p95  35.91bp
-    T in [0.50, 1.00)  n= 170  mean  11.51bp  p95  54.87bp
-    T >= 1.00          n= 586  mean  25.30bp  p95 122.98bp
+  removed 13.26bp of vol on average (median 0.47, p95 65.65, max 280.21)
+    calls   0.16bp mean   puts  20.27bp mean
+    T in [0.00, 0.15)  n= 406  mean   0.36bp  p95   1.85bp
+    T in [0.15, 0.50)  n= 308  mean   9.49bp  p95  36.15bp
+    T in [0.50, 1.00)  n= 165  mean  10.76bp  p95  50.49bp
+    T >= 1.00          n= 581  mean  24.98bp  p95 119.12bp
 
 -- 2/4  training the neural surface --------------------------------------------------------
   w(k,T) = w_SSVI(k,T) * [1 + alpha*tanh(net(k,T))]     alpha = 0.35, hidden = (64, 64, 64)
   penalties: dw/dT >= 0 and Durrleman g >= 0, on 2048 collocation points per epoch
 
-trained 1483 epochs in 92.0s (best epoch 1082)
-  train IV RMSE 26.1bp  val IV RMSE 16.4bp  (n_train=1110, n_val=277)
-  final worst dw/dT +1.09e-02  worst g +6.01e-02
+trained 1500 epochs in 75.4s (best epoch 1117)
+  train IV RMSE 39.6bp  val IV RMSE 45.3bp  (n_train=1168, n_val=292)
+  selected epoch worst dw/dT +1.06e-02  worst g +3.82e-03
+
+  ablation: same network against a flat constant-vol prior
+  trained 1500 epochs in 66.0s (best epoch 1482)
+    train IV RMSE 680.7bp  val IV RMSE 703.0bp  (n_train=1168, n_val=292)
+    selected epoch worst dw/dT +2.23e-02  worst g +9.26e-04
 
 -- 3/4  scorecard --------------------------------------------------------------------------
 surface                              IV RMSE   max err   px RMSE  in spread  cal viol  bfly viol
 ------------------------------------------------------------------------------------------------
-Neural (SSVI prior + penalties)        24.4bp    673.7bp    0.3291      15.4%     0.00%      0.00%
-SVI (per-slice)                        47.5bp    637.4bp    0.6020       5.9%     0.00%      0.04%
-SSVI (joint)                          105.8bp    828.5bp    1.0837       2.6%     0.00%      0.00%
+Neural (SSVI prior + penalties)        40.8bp    648.3bp    0.3782      12.3%     0.00%      0.01%
+Neural (flat prior + penalties)       685.2bp   4473.4bp    2.2550       1.2%     0.00%      0.09%
+SVI (per-slice)                        65.6bp    652.3bp    0.6533       6.4%     0.00%      0.04%
+SSVI (joint)                          142.2bp   1450.0bp    1.0403       2.3%     0.00%      0.00%
 
   IV RMSE     vega-weighted implied-vol error against the quotes
-  max err     worst single-quote vol error
+  max err     worst single-quote vol error (located below)
   px RMSE     the same fit measured in price space
   in spread   share of quotes re-priced inside the bid-ask
   cal viol  ) share of a dense (k,T) grid - extending past the quoted
   bfly viol ) strikes - that admits calendar / butterfly arbitrage
 
+  Neural (SSVI prior + penalties)    648.3bp at k=-0.574 T=1.78y (fitting weight 0.502, chain mean 1)
+  Neural (flat prior + penalties)    4473.4bp at k=-0.669 T=0.11y (fitting weight 0.0451, chain mean 1)
+  SVI (per-slice)                    652.3bp at k=+0.250 T=0.28y (fitting weight 0.17, chain mean 1)
+  SSVI (joint)                       1450.0bp at k=-0.669 T=0.11y (fitting weight 0.0451, chain mean 1)
+  (a large error at a weight near zero is the vega/spread weighting declining to chase a wing quote)
+
 -- 4/4  output -----------------------------------------------------------------------------
   model    results\spy_surface.pt
   chain    results\spy_chain.npz
            (both are what mode [2] loads to price without re-downloading)
-  archive  models\spy_20260903T201316
+  archive  models\spy_20260905T002014
            (mode [3] compares every archived run to help pick one)
   curves   results\training.png
   smiles   results\smiles.png
-  arb map  results\arbitrage_neural.png
+  arb map  results\arbitrage_neural_ssvi.png
+  arb map  results\arbitrage_neural_flat.png
   arb map  results\arbitrage_svi.png
   arb map  results\arbitrage_ssvi.png
   report   results\report.txt
 
 ============================================================================================
-  done in 173.3s
+  done in 241.8s
 ============================================================================================
+
+  Run again and choose [2] to price this surface, or
+  [3] to compare it against every other archived run.

@@ -94,6 +94,14 @@ class FitReport:
     rmse_price: float          # RMSE of re-priced mid, in currency units
     pct_inside_spread: float   # share of quotes re-priced inside the bid-ask
 
+    max_vol_at: tuple[float, float] | None = None   # (k, T) of the worst quote
+    max_vol_weight: float = 0.0
+    """Fitting weight of that worst quote, on the chain's mean-1 scale. A large
+    `max_vol_bps` at a weight of 0.02 is the vega/spread weighting working as
+    intended -- a deep wing quote whose vol is barely identified by its price --
+    and not the same object as a large error at the money. Reporting the error
+    without the weight invites exactly the wrong reading."""
+
     def __str__(self) -> str:
         return (
             f"n={self.n}  IV RMSE={self.rmse_vol_bps:.1f}bp  "
@@ -101,6 +109,14 @@ class FitReport:
             f"price RMSE={self.rmse_price:.4f}  "
             f"inside spread={self.pct_inside_spread:.1f}%"
         )
+
+    def worst_quote_note(self) -> str:
+        """One line locating `max_vol_bps`, with the weight that context needs."""
+        if self.max_vol_at is None:
+            return ""
+        k, T = self.max_vol_at
+        return (f"{self.max_vol_bps:.1f}bp at k={k:+.3f} T={T:.2f}y "
+                f"(fitting weight {self.max_vol_weight:.3g}, chain mean 1)")
 
 
 # -- arbitrage scan -----------------------------------------------------------
@@ -198,6 +214,8 @@ def fit_report(surface: VolSurface, snapshot, weighted: bool = True) -> FitRepor
     px_err = px_model - snapshot.mid_european
     inside = np.abs(px_err) <= snapshot.spread / 2.0
 
+    worst = int(np.argmax(np.abs(err)))
+
     return FitReport(
         n=len(snapshot),
         rmse_vol_bps=float(np.sqrt(np.sum(w * err ** 2))),
@@ -205,4 +223,6 @@ def fit_report(surface: VolSurface, snapshot, weighted: bool = True) -> FitRepor
         max_vol_bps=float(np.max(np.abs(err))),
         rmse_price=float(np.sqrt(np.mean(px_err ** 2))),
         pct_inside_spread=float(100.0 * inside.mean()),
+        max_vol_at=(float(snapshot.k[worst]), float(snapshot.T[worst])),
+        max_vol_weight=float(snapshot.weight[worst]),
     )

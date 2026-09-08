@@ -11,9 +11,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from volsurface.american import binomial_price
-from volsurface.blackscholes import price
-from volsurface.montecarlo import mc_price
+from volsurface.pricing.american import binomial_price
+from volsurface.pricing.blackscholes import price
+from volsurface.pricing.montecarlo import mc_price
 
 
 S, K, T, R, SIGMA = 100.0, 105.0, 1.0, 0.04, 0.25
@@ -87,8 +87,8 @@ def test_de_americanised_iv_recovers_the_lattice_vol():
     the *same* coarse lattice, so its discretisation error cancels and 150 steps
     suffice even though pricing to this accuracy would need far more.
     """
-    from volsurface.american import de_americanised_iv
-    from volsurface.impliedvol import implied_vol
+    from volsurface.pricing.american import de_americanised_iv
+    from volsurface.pricing.impliedvol import implied_vol
 
     S, K, T, r, q, sigma = 100.0, 85.0, 1.5, 0.045, 0.01, 0.25
     F = S * np.exp((r - q) * T)

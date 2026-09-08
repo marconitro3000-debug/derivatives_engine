@@ -49,13 +49,13 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from volsurface.surface import VolSurface
-from volsurface.neural.prior import FlatPrior, TorchSSVIPrior
+from volsurface.surfaces.base import VolSurface
+from volsurface.surfaces.neural.prior import FlatPrior, TorchSSVIPrior
 
 
 @dataclass
 class ModelConfig:
-    """Architecture hyper-parameters (training ones live in `volsurface.neural.train`)."""
+    """Architecture hyper-parameters (training ones live in `volsurface.surfaces.neural.train`)."""
 
     hidden: tuple[int, ...] = (64, 64, 64)
     alpha: float = 0.35          # max relative correction to the prior
@@ -73,8 +73,8 @@ _ACTIVATIONS = {"silu": nn.SiLU, "tanh": nn.Tanh, "gelu": nn.GELU, "softplus": n
 class NeuralVolSurface(nn.Module, VolSurface):
     """Total-variance surface: SSVI prior times a learned bounded correction.
 
-    Implements `volsurface.surface.VolSurface`, so it plugs straight into
-    `volsurface.diagnostics` and is scored by exactly the same code as the parametric
+    Implements `volsurface.surfaces.base.VolSurface`, so it plugs straight into
+    `volsurface.evaluation.diagnostics` and is scored by exactly the same code as the parametric
     baselines -- with one difference: `dw_dT`, `dw_dk` and `d2w_dk2` are
     overridden to use autograd instead of finite differences.
     """

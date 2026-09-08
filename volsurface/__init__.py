@@ -7,12 +7,13 @@ chains and benchmarked against the parametric surfaces a desk actually uses.
 
 The whole library is one idea. A volatility surface is defined by its total
 implied variance ``w(k, T) = sigma(k, T)^2 * T`` over log-moneyness and
-maturity, every model implements the same `surface.VolSurface` interface, and
-every model is therefore judged by the same two questions:
+maturity, every model implements the same `surfaces.base.VolSurface` interface,
+and every model is therefore judged by the same two questions:
 
-* how closely does it reproduce the quotes  (`diagnostics.fit_report`)
+* how closely does it reproduce the quotes
+  (`evaluation.diagnostics.fit_report`)
 * does the surface it defines *between* them admit static arbitrage
-  (`diagnostics.scan_arbitrage`)
+  (`evaluation.diagnostics.scan_arbitrage`)
 
 Reporting only the first is how a model that prices negative probabilities wins
 a comparison.
@@ -25,76 +26,117 @@ Typical use
     result = train_surface(chain)
     print(comparison_table(compare(chain, result)))
 
-Module map
-----------
-    conventions   day-count conversions
-    blackscholes  closed-form price and Greeks
-    impliedvol    inversion, with an identifiability guard
-    chain         option chain -> clean (k, T, IV) cloud
-    surface       the VolSurface interface
-    pricer        price one named option (strike, expiry date, side)
-    diagnostics   arbitrage scans and fit reports
-    svi           raw SVI and joint SSVI baselines
-    neural        the network: prior, model, penalties, training
-    report        scorecards and figures
-    registry      archive of trained runs, for comparing which model to use
-    american      binomial tree, and the de-Americanisation it makes possible
-    montecarlo    independent numerical check on the analytic formula
+    from volsurface import price_option
+    q = price_option(result.model, chain, strike=780, expiry="2026-12-19", kind="put")
+
+Where things are
+----------------
+Four packages, each named after the question it answers. Every name below is
+importable from `volsurface` directly as well -- this module re-exports the
+whole public surface -- so the layout is for reading the code, not a tax on
+using it.
+
+``volsurface.data``       **where the quotes come from.**
+                          `fetch_chain` (live), `synthetic_snapshot` (the
+                          offline generator the tests fit), `build_snapshot`
+                          (raw frames -> clean chain, every filter), `forward`
+                          (the forward and discount from put-call parity),
+                          `ChainSnapshot`, day counts.
+
+``volsurface.pricing``    **what a price is.** Black-Scholes closed form,
+                          implied-vol inversion, the American lattice and the
+                          de-Americanisation it enables, Monte Carlo as an
+                          independent check, and `price_option` -- strike,
+                          expiry date and side in, price and Greeks out.
+
+``volsurface.surfaces``   **the models.** `base` is the interface, `svi` the
+                          parametric baselines (raw SVI per expiry, joint
+                          SSVI), and **`neural` is the network** -- prior,
+                          model, penalties, dataset, training loop.
+
+``volsurface.evaluation`` **how a surface is judged.** Fit reports, the
+                          dense-grid arbitrage scan, the scorecard and figures,
+                          and the archive of trained runs.
 """
 
-from .american import (
-    american_implied_vol,
-    binomial_price,
-    carry_from_forward,
-    de_americanised_iv,
+from .data import (
+    ChainSnapshot,
+    build_snapshot,
+    fetch_chain,
+    fit_forward,
+    implied_forward,
+    synthetic_snapshot,
+    year_fraction,
 )
-from .blackscholes import greeks, price, put_call_parity_check
-from .chain import ChainSnapshot, build_snapshot, fetch_chain, synthetic_snapshot
-from .diagnostics import ArbitrageReport, FitReport, fit_report, scan_arbitrage
-from .impliedvol import implied_vol
-from .montecarlo import mc_price
-from .neural import (
-    ModelConfig,
-    NeuralVolSurface,
-    PenaltyWeights,
-    TrainConfig,
-    TrainResult,
-    train_surface,
-)
-from .pricer import OptionQuote, price_option, resolve_maturity
-from .report import (
+from .evaluation import (
+    ArbitrageReport,
+    FitReport,
+    RunRecord,
+    butterfly_g,
     compare,
     comparison_table,
     evaluate_surface,
+    fit_report,
+    list_runs,
+    load_history,
+    load_run,
     plot_arbitrage_map,
     plot_fit,
     plot_model_comparison,
     plot_quote,
     plot_training,
+    runs_table,
+    save_run,
+    scan_arbitrage,
     worst_quote_notes,
 )
-from .registry import RunRecord, list_runs, load_history, load_run, runs_table, save_run
-from .surface import VolSurface
-from .svi import SSVIParams, SSVISurface, SVIParams, SVISliceSurface
+from .pricing import (
+    OptionQuote,
+    american_implied_vol,
+    binomial_price,
+    carry_from_forward,
+    de_americanised_iv,
+    greeks,
+    implied_vol,
+    mc_price,
+    price,
+    price_option,
+    put_call_parity_check,
+    resolve_maturity,
+)
+from .surfaces import (
+    ModelConfig,
+    NeuralVolSurface,
+    PenaltyWeights,
+    SSVIParams,
+    SSVISurface,
+    SVIParams,
+    SVISliceSurface,
+    TrainConfig,
+    TrainResult,
+    VolSurface,
+    train_surface,
+)
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     # market data
     "ChainSnapshot", "fetch_chain", "build_snapshot", "synthetic_snapshot",
+    "implied_forward", "fit_forward", "year_fraction",
     # pricing primitives
     "price", "greeks", "put_call_parity_check", "implied_vol",
     "binomial_price", "de_americanised_iv", "american_implied_vol",
     "carry_from_forward", "mc_price",
+    # pricing one named option off a fitted surface
+    "OptionQuote", "price_option", "resolve_maturity",
     # surfaces
     "VolSurface", "SVIParams", "SVISliceSurface", "SSVIParams", "SSVISurface",
     "NeuralVolSurface", "ModelConfig",
     # fitting
     "TrainConfig", "TrainResult", "PenaltyWeights", "train_surface",
-    # pricing one named option off a fitted surface
-    "OptionQuote", "price_option", "resolve_maturity",
     # scoring
-    "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage",
+    "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage", "butterfly_g",
     "evaluate_surface", "compare", "comparison_table", "worst_quote_notes",
     "plot_fit", "plot_arbitrage_map", "plot_training", "plot_quote", "plot_model_comparison",
     # registry

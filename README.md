@@ -174,7 +174,12 @@ per-slice construction breaks down between listed expiries.
 
 ## How it works
 
-### 1. The chain is cleaned properly — [`volsurface/chain.py`](volsurface/chain.py)
+### 1. The chain is cleaned properly — [`volsurface/data/`](volsurface/data/)
+
+One module per decision: [`clean.py`](volsurface/data/clean.py) holds every
+filter, [`forward.py`](volsurface/data/forward.py) the parity fit,
+[`fetch.py`](volsurface/data/fetch.py) the download, and
+[`synthetic.py`](volsurface/data/synthetic.py) the offline generator.
 
 Surface quality is decided here, not in the model.
 
@@ -194,7 +199,7 @@ assumptions.
 **Quotes are weighted by vega / spread.** Unweighted least squares in vol space
 chases deep wing options whose volatility is barely identified by their price.
 
-### 2. The American problem — [`volsurface/american.py`](volsurface/american.py)
+### 2. The American problem — [`volsurface/pricing/american.py`](volsurface/pricing/american.py)
 
 SPY options are **American**. A European inversion has nowhere to put the
 early-exercise premium and charges it to volatility. Measured on the chain above:
@@ -232,7 +237,7 @@ expiry. The two unknowns are circular (you need the forward to de-Americanise,
 and de-Americanised quotes to fit the forward), so `fit_forward` runs them as a
 short fixed point. Two passes cut the forward error by 7×.
 
-### 3. The model is a bounded correction, not a free-form fit — [`volsurface/neural/model.py`](volsurface/neural/model.py)
+### 3. The model is a bounded correction, not a free-form fit — [`volsurface/surfaces/neural/model.py`](volsurface/surfaces/neural/model.py)
 
 ```
 w(k, T) = w_SSVI(k, T) · [ 1 + α·tanh( net(k, T) ) ]
@@ -257,7 +262,7 @@ Inputs are `(k, √T, k/√T, k², k·√T)`. Standardised moneyness `k/√T` ma
 is the coordinate in which smiles across maturities look alike, and handing it to
 the network saves it from learning the `√T` scaling from a few hundred points.
 
-### 4. No-arbitrage is enforced where there is no data — [`volsurface/neural/arbitrage.py`](volsurface/neural/arbitrage.py)
+### 4. No-arbitrage is enforced where there is no data — [`volsurface/surfaces/neural/arbitrage.py`](volsurface/surfaces/neural/arbitrage.py)
 
 ```
 calendar    ∂w/∂T  ≥ 0
@@ -279,7 +284,7 @@ This is why the model runs in float64 with a smooth activation — the butterfly
 penalty differentiates twice, and a ReLU network has zero second derivative
 almost everywhere.
 
-### 5. Everything is scored by the same code — [`volsurface/diagnostics.py`](volsurface/diagnostics.py)
+### 5. Everything is scored by the same code — [`volsurface/evaluation/diagnostics.py`](volsurface/evaluation/diagnostics.py)
 
 Neural, SVI and SSVI all implement `volsurface.surface.VolSurface`, so they pass
 through identical fit reports and arbitrage scans. Reporting fit *and* arbitrage
@@ -290,31 +295,55 @@ first.
 
 ## Layout
 
+Four packages, each named after the question it answers. **The network is in
+[`volsurface/surfaces/neural/`](volsurface/surfaces/neural/)**, next to the
+parametric baselines it is compared against, because it is one more
+implementation of the same interface — which is what lets identical code score
+all three.
+
 ```
-main.py                    the study, start to finish — press Run
-config.py                  every knob, one file
-notebook.ipynb             the same study as a paper, with outputs
+main.py                        the study, start to finish — press Run
+cli.py                         the flag list, generated from RunConfig
+config.py                      every knob, one file
+notebook.ipynb                 the same study as a paper, with outputs
+
 volsurface/
-    chain.py               option chain -> clean (k, T, IV) cloud
-    american.py            binomial tree; de-Americanisation
-    blackscholes.py        closed-form price and Greeks
-    impliedvol.py          inversion, with an identifiability guard
-    surface.py             the VolSurface interface — everything is total variance
-    pricer.py              strike + expiry date + side -> price, Greeks, caveats
-    diagnostics.py         arbitrage scans and fit reports
-    svi.py                 raw SVI (quasi-explicit) and joint SSVI
-    report.py              scorecards, training curves, smiles, arbitrage maps
-    registry.py            archive of trained runs — which checkpoint to use
-    montecarlo.py          independent numerical check on the analytic formula
-    conventions.py         day counts
-    neural/
-        prior.py           SSVI in torch, differentiable end to end
-        model.py           prior x bounded correction
-        arbitrage.py       autodiff penalties on collocation points
-        dataset.py         tensors and the stratified split
-        train.py           vega-weighted objective, penalty warm-up, feasible-epoch selection
-tests/                     128 tests, no network required
+    data/                      WHERE THE QUOTES COME FROM
+        fetch.py               the live Yahoo Finance chain
+        clean.py               raw frames -> clean chain; every filter lives here
+        forward.py             forward + discount from put-call parity
+        snapshot.py            ChainSnapshot — the only structure that leaves here
+        synthetic.py           the offline generator: a chain from a known SSVI surface
+        conventions.py         day counts
+
+    pricing/                   WHAT A PRICE IS
+        blackscholes.py        closed-form price and Greeks
+        impliedvol.py          inversion, with an identifiability guard
+        american.py            binomial lattice; de-Americanisation
+        montecarlo.py          independent numerical check on the analytic formula
+        option.py              strike + expiry date + side -> price, Greeks, caveats
+
+    surfaces/                  THE MODELS
+        base.py                the VolSurface interface — everything is total variance
+        svi.py                 raw SVI (quasi-explicit) and joint SSVI
+        neural/                ** the network **
+            prior.py           SSVI in torch, differentiable end to end
+            model.py           prior x bounded correction
+            arbitrage.py       autodiff penalties on collocation points
+            dataset.py         tensors and the stratified split
+            train.py           vega-weighted objective, warm-up, feasible-epoch selection
+
+    evaluation/                HOW A SURFACE IS JUDGED
+        diagnostics.py         fit reports and the dense-grid arbitrage scan
+        report.py              scorecards, training curves, smiles, arbitrage maps
+        registry.py            archive of trained runs — which checkpoint to use
+
+tests/                         128 tests, no network required
 ```
+
+Every public name is re-exported from `volsurface` itself, so the layout is for
+reading the code, not a tax on using it: `from volsurface import price_option`
+works regardless of which package it lives in.
 
 ## Using it as a library
 

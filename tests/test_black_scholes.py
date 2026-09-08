@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from volsurface.blackscholes import greeks, price, put_call_parity_check
-from volsurface.impliedvol import implied_vol
+from volsurface.pricing.blackscholes import greeks, price, put_call_parity_check
+from volsurface.pricing.impliedvol import implied_vol
 
 
 def test_put_call_parity_holds_with_dividends():

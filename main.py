@@ -423,7 +423,7 @@ def run_sweep(cfg: RunConfig) -> int:
     market did in the intervening minutes -- on a live chain that is easily
     larger than the effect being measured.
     """
-    from volsurface.neural.model import ModelConfig
+    from volsurface.surfaces.neural.model import ModelConfig
 
     t0 = time.time()
     cfg.output_dir.mkdir(parents=True, exist_ok=True)

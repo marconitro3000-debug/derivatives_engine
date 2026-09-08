@@ -55,11 +55,11 @@ from datetime import date, datetime
 
 import numpy as np
 
+from ..data.conventions import year_fraction
+from ..data.snapshot import ChainSnapshot
+from ..evaluation.diagnostics import butterfly_g
+from ..surfaces.base import VolSurface
 from .blackscholes import greeks, price as bs_price
-from .chain import ChainSnapshot
-from .conventions import year_fraction
-from .diagnostics import butterfly_g
-from .surface import VolSurface
 
 __all__ = ["OptionQuote", "price_option", "resolve_maturity"]
 

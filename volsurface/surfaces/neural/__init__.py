@@ -1,5 +1,5 @@
 """
-volsurface.neural
+volsurface.surfaces.neural
 =================
 
 The network, its prior, its constraints, and the loop that fits them.

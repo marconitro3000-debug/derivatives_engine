@@ -2,7 +2,7 @@
 volsurface/neural/arbitrage.py
 Soft no-arbitrage constraints, differentiated exactly.
 
-The two static conditions from `volsurface.diagnostics` are turned into penalties the
+The two static conditions from `volsurface.evaluation.diagnostics` are turned into penalties the
 optimiser can see:
 
     calendar   dw/dT      >= 0
@@ -91,7 +91,7 @@ class CollocationRegion:
         negative first. Drawing uniformly in ``sqrt(T)`` gives a density
         proportional to ``1/sqrt(T)``, which concentrates the constraint where
         the surface actually bends, at no extra cost. It also matches how the
-        expiries themselves are sampled in `volsurface.chain`.
+        expiries themselves are sampled in `volsurface.data`.
         """
         u = torch.rand(n, 2, dtype=torch.float64, generator=generator)
         k = self.k_lo + u[:, 0] * (self.k_hi - self.k_lo)

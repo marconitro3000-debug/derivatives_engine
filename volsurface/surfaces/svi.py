@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import differential_evolution, minimize
 
-from volsurface.surface import VolSurface
+from volsurface.surfaces.base import VolSurface
 
 
 # -- raw SVI ------------------------------------------------------------------
@@ -249,7 +249,7 @@ class SVISliceSurface(VolSurface):
 
     Deliberately the naive desk construction: fit each smile as well as
     possible, then join the slices. Nothing enforces consistency between them,
-    which is precisely why `volsurface.diagnostics.scan_arbitrage` finds calendar
+    which is precisely why `volsurface.evaluation.diagnostics.scan_arbitrage` finds calendar
     violations in the gaps between listed expiries.
     """
 
@@ -301,7 +301,7 @@ class SSVISurface(VolSurface):
     piecewise-linearly through the origin, so ``dw/dT >= 0`` holds everywhere
     rather than only at the nodes. Beyond the last listed expiry it extrapolates
     at the final slope, which preserves monotonicity where a spline would turn
-    over. Linear interpolation is also what lets `volsurface.neural.prior.TorchSSVIPrior`
+    over. Linear interpolation is also what lets `volsurface.surfaces.neural.prior.TorchSSVIPrior`
     reproduce this surface exactly in torch -- a smoother scheme would leave the
     neural model correcting a prior subtly different from the one reported here.
     """

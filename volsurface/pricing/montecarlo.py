@@ -6,7 +6,7 @@ Nothing in the surface pipeline calls this. It exists so that the closed-form
 Black-Scholes price the whole project inverts is verified by two unrelated
 numerical methods: `tests/test_numerical_pricers.py` requires the analytic price
 to fall inside this estimator's 95% confidence interval and requires the
-`volsurface.american` lattice to converge to it. If all three ever disagree, the
+`volsurface.pricing.american` lattice to converge to it. If all three ever disagree, the
 analytic formula is the first place to look.
 
 Supported payoffs

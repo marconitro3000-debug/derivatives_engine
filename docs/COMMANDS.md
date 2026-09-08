@@ -263,8 +263,8 @@ Piezas sueltas que quizá quieras por separado:
 
 ```python
 from volsurface import synthetic_snapshot, scan_arbitrage, fit_report
-from volsurface.svi import SVISliceSurface, SSVISurface
-from volsurface.neural import TrainConfig, ModelConfig, PenaltyWeights
+from volsurface.surfaces.svi import SVISliceSurface, SSVISurface
+from volsurface.surfaces.neural import TrainConfig, ModelConfig, PenaltyWeights
 
 chain = synthetic_snapshot(noise_bps=25.0)     # cadena generada, sin red
 svi   = SVISliceSurface.fit(chain)             # el baseline flexible

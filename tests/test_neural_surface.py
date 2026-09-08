@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 import torch
 
-from volsurface.svi import SSVISurface
-from volsurface.diagnostics import scan_arbitrage
-from volsurface.neural.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties, durrleman_g
-from volsurface.neural.dataset import stratified_split, to_tensors
-from volsurface.neural.model import ModelConfig, NeuralVolSurface
-from volsurface.neural.prior import FlatPrior, TorchSSVIPrior
-from volsurface.neural.train import TrainConfig, train_surface
+from volsurface.surfaces.svi import SSVISurface
+from volsurface.evaluation.diagnostics import scan_arbitrage
+from volsurface.surfaces.neural.arbitrage import CollocationRegion, PenaltyWeights, arbitrage_penalties, durrleman_g
+from volsurface.surfaces.neural.dataset import stratified_split, to_tensors
+from volsurface.surfaces.neural.model import ModelConfig, NeuralVolSurface
+from volsurface.surfaces.neural.prior import FlatPrior, TorchSSVIPrior
+from volsurface.surfaces.neural.train import TrainConfig, train_surface
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +90,7 @@ def test_autograd_derivatives_match_finite_differences(model):
     k = np.linspace(-0.3, 0.3, 15)
     T = np.full_like(k, 0.6)
 
-    from volsurface.surface import VolSurface
+    from volsurface.surfaces.base import VolSurface
 
     assert np.allclose(model.dw_dk(k, T), VolSurface.dw_dk(model, k, T), atol=1e-6)
     assert np.allclose(model.d2w_dk2(k, T), VolSurface.d2w_dk2(model, k, T), atol=1e-4)
@@ -225,7 +225,7 @@ def trained(noisy_chain):
 
 def test_training_improves_on_the_prior(noisy_chain, trained):
     """If the network cannot beat SSVI on its own training data, it is not working."""
-    from volsurface.diagnostics import fit_report
+    from volsurface.evaluation.diagnostics import fit_report
 
     neural = fit_report(trained.model, noisy_chain).rmse_vol_bps
     prior = fit_report(trained.prior_surface, noisy_chain).rmse_vol_bps
@@ -243,7 +243,7 @@ def test_trained_surface_is_arbitrage_free(noisy_chain, trained):
 
 def test_flat_prior_ablation_runs_and_still_fits(noisy_chain):
     """Without the SSVI prior the network must still produce a usable surface."""
-    from volsurface.diagnostics import fit_report
+    from volsurface.evaluation.diagnostics import fit_report
 
     cfg = TrainConfig(epochs=250, warmup_epochs=60, patience=250, seed=0)
     cfg.penalties.n_points = 512
@@ -356,7 +356,7 @@ def test_model_name_identifies_its_prior(prior):
 
 
 def test_fit_report_locates_and_weights_the_worst_quote(noisy_chain, trained):
-    from volsurface.diagnostics import fit_report
+    from volsurface.evaluation.diagnostics import fit_report
 
     rep = fit_report(trained.model, noisy_chain)
     k, T = rep.max_vol_at
@@ -379,8 +379,8 @@ def test_selected_epoch_is_arbitrage_free_when_one_exists(noisy_chain):
 
 def test_history_and_weights_describe_the_same_epoch(noisy_chain):
     """The selected epoch's recorded error must be the shipped model's error."""
-    from volsurface.neural.dataset import stratified_split, to_tensors
-    from volsurface.neural.train import _weighted_rmse_bps
+    from volsurface.surfaces.neural.dataset import stratified_split, to_tensors
+    from volsurface.surfaces.neural.train import _weighted_rmse_bps
 
     cfg = TrainConfig(epochs=200, warmup_epochs=40, patience=200, seed=0)
     cfg.penalties.n_points = 256

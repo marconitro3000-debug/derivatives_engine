@@ -12,9 +12,9 @@ from datetime import date, datetime, timedelta
 import numpy as np
 import pytest
 
-from volsurface.blackscholes import price as bs_price
-from volsurface.pricer import OptionQuote, price_option, resolve_maturity
-from volsurface.svi import SSVISurface
+from volsurface.pricing.blackscholes import price as bs_price
+from volsurface.pricing.option import OptionQuote, price_option, resolve_maturity
+from volsurface.surfaces.svi import SSVISurface
 
 
 @pytest.fixture(scope="module")
@@ -174,7 +174,7 @@ def test_greeks_all_carry_the_discount_factor(clean_chain, surface, mid_expiry):
     expiry, _ = mid_expiry
     quote = price_option(surface, clean_chain, clean_chain.spot, expiry, "call")
 
-    from volsurface.blackscholes import greeks
+    from volsurface.pricing.blackscholes import greeks
 
     raw = greeks(quote.forward, quote.strike, quote.T, 0.0, quote.implied_vol)
     assert quote.delta == pytest.approx(quote.discount * raw["delta_call"])

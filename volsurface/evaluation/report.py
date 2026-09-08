@@ -3,11 +3,11 @@ volsurface/report.py
 Scoring the neural surface against the parametric baselines, on equal terms.
 
 Every surface -- per-slice SVI, joint SSVI, neural -- implements
-`volsurface.surface.VolSurface`, so the same two reports apply to all of them:
+`volsurface.surfaces.base.VolSurface`, so the same two reports apply to all of them:
 
-* `volsurface.diagnostics.fit_report`: how well it reproduces the quotes it was fitted
+* `volsurface.evaluation.diagnostics.fit_report`: how well it reproduces the quotes it was fitted
   to, in vol space and in price space.
-* `volsurface.diagnostics.scan_arbitrage`: whether the surface it defines *between*
+* `volsurface.evaluation.diagnostics.scan_arbitrage`: whether the surface it defines *between*
   those quotes admits static arbitrage.
 
 Reporting both together is the point of the project. Per-slice SVI wins the
@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from volsurface.diagnostics import ArbitrageReport, FitReport, fit_report, scan_arbitrage
-from volsurface.surface import VolSurface
+from volsurface.evaluation.diagnostics import ArbitrageReport, FitReport, fit_report, scan_arbitrage
+from volsurface.surfaces.base import VolSurface
 
 
 @dataclass
@@ -117,7 +117,7 @@ def compare(snapshot, result, include_baselines: bool = True,
     degenerate smile) is skipped with a note rather than aborting the run --
     losing the SVI column should not cost you the neural result.
     """
-    from volsurface.svi import SSVISurface, SVISliceSurface
+    from volsurface.surfaces.svi import SSVISurface, SVISliceSurface
 
     scores = [evaluate_surface(result.model, snapshot)]
     scores += [evaluate_surface(s, snapshot) for s in extra_surfaces]
@@ -191,7 +191,7 @@ def plot_arbitrage_map(surface: VolSurface, snapshot, path: str | None = None,
     """
     import matplotlib.pyplot as plt
 
-    from volsurface.diagnostics import butterfly_g
+    from volsurface.evaluation.diagnostics import butterfly_g
 
     k_lo, k_hi = snapshot.k.min(), snapshot.k.max()
     pad = 0.25 * (k_hi - k_lo)
@@ -328,7 +328,7 @@ def plot_training(result, path: str | None = None, show: bool = False):
 def plot_model_comparison(records, path: str | None = None, show: bool = False):
     """Validation error and generalisation gap across every archived run.
 
-    Reads straight off `volsurface.registry.RunRecord`, so it works whether the
+    Reads straight off `volsurface.evaluation.registry.RunRecord`, so it works whether the
     runs came from the same session or from `models/` accumulated over weeks of
     experiments -- the point of archiving every run instead of overwriting the
     last one.

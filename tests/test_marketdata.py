@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from volsurface.american import binomial_price, carry_from_forward
-from volsurface.chain import build_snapshot, implied_forward
-from volsurface.blackscholes import price as bs_price
+from volsurface.pricing.american import binomial_price, carry_from_forward
+from volsurface.data import build_snapshot, implied_forward
+from volsurface.pricing.blackscholes import price as bs_price
 
 
 # -- put-call parity forward fit ----------------------------------------------

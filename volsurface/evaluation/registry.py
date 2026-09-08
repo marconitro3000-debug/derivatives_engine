@@ -1,5 +1,5 @@
 """
-volsurface/registry.py
+volsurface/evaluation/registry.py
 A folder of trained models you can actually compare.
 
 `main.py`'s TRAIN mode does not overwrite last run's model when you fit again --

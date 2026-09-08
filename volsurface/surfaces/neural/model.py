@@ -1,5 +1,5 @@
 """
-volsurface/neural/model.py
+volsurface/surfaces/neural/model.py
 The neural implied-volatility surface.
 
 Architecture

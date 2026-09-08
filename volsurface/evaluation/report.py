@@ -1,5 +1,5 @@
 """
-volsurface/report.py
+volsurface/evaluation/report.py
 Scoring the neural surface against the parametric baselines, on equal terms.
 
 Every surface -- per-slice SVI, joint SSVI, neural -- implements
@@ -409,6 +409,119 @@ def plot_quote(surface: VolSurface, snapshot, strike: float, T: float,
     ax.set_ylabel("implied volatility (%)")
     ax.set_title(f"{snapshot.ticker}  K = {strike:g}, T = {T:.3f}y  "
                  f"({'interpolated' if inside else 'EXTRAPOLATED'})", fontsize=10)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def capacity_table(rows: list[dict], reference_spec: str | None = None) -> str:
+    """The architecture sweep as a table, measured against a reference arm.
+
+    Reported as a *difference* rather than in isolation, because the number that
+    matters is not "512x4 scores X" but "512x4 buys you X basis points over the
+    configured default for Y times the parameters". With no `reference_spec`, or
+    one that was not swept, the best arm becomes the reference -- the caller
+    knows which architecture is configured, this function does not.
+    """
+    import numpy as np
+
+    by_spec: dict[str, list[dict]] = {}
+    for r in rows:
+        by_spec.setdefault(r["spec"], []).append(r)
+
+    if reference_spec in by_spec:
+        ref = float(np.mean([r["val"] for r in by_spec[reference_spec]]))
+    else:
+        ref = min(float(np.mean([r["val"] for r in v])) for v in by_spec.values())
+
+    header = (f"{'arch':>8} {'params':>10} {'train':>9} {'val':>9} {'chain':>9} "
+              f"{'vs default':>11} {'cal':>7} {'bfly':>7} {'clean':>6} {'time':>7}")
+    lines = [header, "-" * len(header)]
+    for spec, group in by_spec.items():
+        val = float(np.mean([r["val"] for r in group]))
+        lines.append(
+            f"{spec:>8} {group[0]['params']:>10,d} "
+            f"{np.mean([r['train'] for r in group]):>8.1f}bp "
+            f"{val:>8.1f}bp "
+            f"{np.mean([r['chain'] for r in group]):>8.1f}bp "
+            f"{val - ref:>+10.1f}bp "
+            f"{np.mean([r['cal'] for r in group]):>6.2f}% "
+            f"{np.mean([r['bfly'] for r in group]):>6.2f}% "
+            f"{sum(r['feasible'] for r in group):>3}/{len(group):<2} "
+            f"{np.mean([r['secs'] for r in group]):>6.1f}s"
+        )
+
+    lines += [
+        "",
+        "  train / val   vega-weighted IV RMSE at the selected epoch",
+        "  chain         the same error over every quote, train and validation",
+        "  vs default    validation error relative to the configured architecture;",
+        "                negative means the bigger network actually bought something",
+        "  cal / bfly    share of a dense (k,T) grid admitting arbitrage",
+        "  clean         arms whose selected epoch was arbitrage-free on its own draw",
+    ]
+    return "\n".join(lines)
+
+
+def plot_capacity(rows: list[dict], path: str | None = None, show: bool = False):
+    """Validation error against parameter count, log x.
+
+    The shape is the whole argument: it flattens almost immediately, which is
+    what a problem whose error floor is the bid-ask rather than the model looks
+    like. Training error is drawn alongside because if capacity were the binding
+    constraint that curve would be heading for zero, and it does not.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    by_spec: dict[str, list[dict]] = {}
+    for r in rows:
+        by_spec.setdefault(r["spec"], []).append(r)
+
+    specs = list(by_spec)
+    params = np.array([by_spec[s][0]["params"] for s in specs], dtype=float)
+    val = np.array([np.mean([r["val"] for r in by_spec[s]]) for s in specs])
+    train = np.array([np.mean([r["train"] for r in by_spec[s]]) for s in specs])
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    ax.plot(params, train, "o-", lw=1.3, ms=4, label="train")
+    ax.plot(params, val, "o-", lw=1.6, ms=5, label="validation")
+    for x, y, s in zip(params, val, specs):
+        ax.annotate(s, (x, y), textcoords="offset points", xytext=(0, 7),
+                    ha="center", fontsize=8)
+    ax.set_xscale("log")
+    ax.set_xlabel("trainable parameters in the correction network")
+    ax.set_ylabel("IV RMSE (bp)")
+    ax.set_title("Capacity vs error — same chain, same budget, same split")
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_run_overlay(records, path: str | None = None, show: bool = False):
+    """Every archived run's validation curve on one axis.
+
+    `plot_model_comparison` ranks the runs by their final numbers; this shows
+    how they got there, which is where a run that converged smoothly is
+    distinguishable from one that got lucky on the epoch it happened to select.
+    """
+    import matplotlib.pyplot as plt
+
+    if not records:
+        raise ValueError("no runs to overlay")
+
+    from .registry import load_history
+
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    for r in records:
+        h = load_history(r)
+        ax.plot(h["val_rmse_bps"], lw=1.2,
+                label=f"{r.run_id}  (best {r.val_rmse_bps:.1f}bp)")
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("validation IV RMSE (bp)")
+    ax.set_title("Validation curves across archived runs")
     ax.legend(fontsize=8)
     ax.grid(alpha=0.25)
     fig.tight_layout()

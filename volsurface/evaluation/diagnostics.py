@@ -1,5 +1,5 @@
 """
-volsurface/diagnostics.py
+volsurface/evaluation/diagnostics.py
 Static-arbitrage diagnostics for any `VolSurface`, and vol/price fit errors.
 
 Two conditions decide whether a total-variance surface ``w(k, T)`` is free of

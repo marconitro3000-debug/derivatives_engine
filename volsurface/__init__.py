@@ -46,8 +46,8 @@ using it.
 ``volsurface.pricing``    **what a price is.** Black-Scholes closed form,
                           implied-vol inversion, the American lattice and the
                           de-Americanisation it enables, Monte Carlo as an
-                          independent check, and `price_option` -- strike,
-                          expiry date and side in, price and Greeks out.
+                          independent check. Primitives: numbers in, numbers
+                          out, no dependency on anything else here.
 
 ``volsurface.surfaces``   **the models.** `base` is the interface, `svi` the
                           parametric baselines (raw SVI per expiry, joint
@@ -57,6 +57,15 @@ using it.
 ``volsurface.evaluation`` **how a surface is judged.** Fit reports, the
                           dense-grid arbitrage scan, the scorecard and figures,
                           and the archive of trained runs.
+
+``volsurface.quote``      **using a fitted surface.** `price_option` -- strike,
+                          expiry date and side in, price, Greeks and the
+                          caveats needed to judge the number out. It sits above
+                          the four packages because it consumes all of them.
+
+The dependencies run strictly one way, ``pricing -> surfaces -> data ->
+evaluation -> quote``, and `tests/test_layout.py` fails if that stops being
+true.
 """
 
 from .data import (
@@ -73,6 +82,7 @@ from .evaluation import (
     FitReport,
     RunRecord,
     butterfly_g,
+    capacity_table,
     compare,
     comparison_table,
     evaluate_surface,
@@ -81,9 +91,11 @@ from .evaluation import (
     load_history,
     load_run,
     plot_arbitrage_map,
+    plot_capacity,
     plot_fit,
     plot_model_comparison,
     plot_quote,
+    plot_run_overlay,
     plot_training,
     runs_table,
     save_run,
@@ -91,7 +103,6 @@ from .evaluation import (
     worst_quote_notes,
 )
 from .pricing import (
-    OptionQuote,
     american_implied_vol,
     binomial_price,
     carry_from_forward,
@@ -100,10 +111,9 @@ from .pricing import (
     implied_vol,
     mc_price,
     price,
-    price_option,
     put_call_parity_check,
-    resolve_maturity,
 )
+from .quote import MAX_YEARS, OptionQuote, price_option, resolve_maturity
 from .surfaces import (
     ModelConfig,
     NeuralVolSurface,
@@ -138,7 +148,8 @@ __all__ = [
     # scoring
     "FitReport", "ArbitrageReport", "fit_report", "scan_arbitrage", "butterfly_g",
     "evaluate_surface", "compare", "comparison_table", "worst_quote_notes",
-    "plot_fit", "plot_arbitrage_map", "plot_training", "plot_quote", "plot_model_comparison",
+    "capacity_table", "plot_fit", "plot_arbitrage_map", "plot_training", "plot_quote",
+    "plot_model_comparison", "plot_capacity", "plot_run_overlay",
     # registry
     "RunRecord", "save_run", "list_runs", "load_run", "load_history", "runs_table",
 ]

@@ -640,7 +640,7 @@ SVI (per-slice)                     13.74%    24.6287
 ## Tests
 
 ```bash
-pytest                              # 128 tests, no network required
+pytest                              # 161 tests, no network required
 pytest tests/test_marketdata.py     # one module
 pytest -k de_americanis             # one topic
 pytest -x -q                        # stop at the first failure

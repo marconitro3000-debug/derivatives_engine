@@ -18,7 +18,7 @@ Module map
 ----------
     diagnostics  fit reports and the dense-grid arbitrage scan
     report       the scorecard, the training curves, the smiles, the
-                 arbitrage maps
+                 arbitrage maps, and the capacity-sweep table and curve
     registry     the archive of trained runs -- which checkpoint to actually
                  use, ranked by validation error and generalisation gap
 """
@@ -32,13 +32,16 @@ from .diagnostics import (
 )
 from .registry import RunRecord, list_runs, load_history, load_run, runs_table, save_run
 from .report import (
+    capacity_table,
     compare,
     comparison_table,
     evaluate_surface,
     plot_arbitrage_map,
+    plot_capacity,
     plot_fit,
     plot_model_comparison,
     plot_quote,
+    plot_run_overlay,
     plot_training,
     worst_quote_notes,
 )
@@ -48,6 +51,7 @@ __all__ = [
     "FitReport",
     "RunRecord",
     "butterfly_g",
+    "capacity_table",
     "compare",
     "comparison_table",
     "evaluate_surface",
@@ -56,9 +60,11 @@ __all__ = [
     "load_history",
     "load_run",
     "plot_arbitrage_map",
+    "plot_capacity",
     "plot_fit",
     "plot_model_comparison",
     "plot_quote",
+    "plot_run_overlay",
     "plot_training",
     "runs_table",
     "save_run",

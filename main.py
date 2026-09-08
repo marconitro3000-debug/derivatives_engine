@@ -55,6 +55,7 @@ from cli import config_from_args, parse_layers
 from config import CONFIG, RunConfig
 from volsurface import (
     ChainSnapshot,
+    capacity_table,
     ModelConfig,
     NeuralVolSurface,
     PenaltyWeights,
@@ -69,7 +70,9 @@ from volsurface import (
     plot_arbitrage_map,
     plot_fit,
     plot_model_comparison,
+    plot_capacity,
     plot_quote,
+    plot_run_overlay,
     plot_training,
     price_option,
     runs_table,
@@ -228,6 +231,17 @@ def choose_ticker(cfg: RunConfig, mode: str) -> str:
     print(f"  available: {', '.join(available)}")
     raw = ask(f"  ticker [{default}]: ")
     return (raw.upper() if raw else default)
+
+
+def layers_spec(hidden) -> str:
+    """``(64, 64, 64)`` -> ``"64x3"`` -- the inverse of `cli.parse_layers`.
+
+    Only needed to tell the capacity table which arm is the configured
+    default, and only meaningful for the uniform-width architectures the
+    sweep accepts in the first place.
+    """
+    hidden = tuple(hidden)
+    return f"{hidden[0]}x{len(hidden)}" if hidden else ""
 
 
 # ── shared steps ─────────────────────────────────────────────────────────────
@@ -487,7 +501,8 @@ def run_sweep(cfg: RunConfig) -> int:
 
         say()
         say(rule("3/3  capacity vs error"))
-        say(sweep_table(rows, cfg))
+        # main.py knows which arm is the configured default; the table does not.
+        say(capacity_table(rows, reference_spec=layers_spec(CONFIG.hidden_layers)))
 
         if cfg.make_plots:
             path = plot_capacity(rows, str(cfg.output_dir / "sweep.png"),
@@ -504,95 +519,6 @@ def run_sweep(cfg: RunConfig) -> int:
         return 0
     finally:
         say.close()
-
-
-def sweep_table(rows: list[dict], cfg: RunConfig) -> str:
-    """The sweep as a table, with the smallest architecture as the reference.
-
-    Reported against the *baseline* rather than in isolation, because the number
-    that matters is not "512x4 scores X" but "512x4 buys you X basis points over
-    the default for Y times the parameters".
-    """
-    import numpy as np
-
-    by_spec: dict[str, list[dict]] = {}
-    for r in rows:
-        by_spec.setdefault(r["spec"], []).append(r)
-
-    default_spec = next((s for s in by_spec
-                         if parse_layers(s) == tuple(CONFIG.hidden_layers)), None)
-    ref = float(np.mean([r["val"] for r in by_spec[default_spec]])) if default_spec \
-        else min(float(np.mean([r["val"] for r in v])) for v in by_spec.values())
-
-    header = (f"{'arch':>8} {'params':>10} {'train':>9} {'val':>9} {'chain':>9} "
-              f"{'vs default':>11} {'cal':>7} {'bfly':>7} {'clean':>6} {'time':>7}")
-    lines = [header, "-" * len(header)]
-    for spec, group in by_spec.items():
-        val = float(np.mean([r["val"] for r in group]))
-        lines.append(
-            f"{spec:>8} {group[0]['params']:>10,d} "
-            f"{np.mean([r['train'] for r in group]):>8.1f}bp "
-            f"{val:>8.1f}bp "
-            f"{np.mean([r['chain'] for r in group]):>8.1f}bp "
-            f"{val - ref:>+10.1f}bp "
-            f"{np.mean([r['cal'] for r in group]):>6.2f}% "
-            f"{np.mean([r['bfly'] for r in group]):>6.2f}% "
-            f"{sum(r['feasible'] for r in group):>3}/{len(group):<2} "
-            f"{np.mean([r['secs'] for r in group]):>6.1f}s"
-        )
-
-    lines += [
-        "",
-        "  train / val   vega-weighted IV RMSE at the selected epoch",
-        "  chain         the same error over every quote, train and validation",
-        "  vs default    validation error relative to the configured architecture;",
-        "                negative means the bigger network actually bought something",
-        "  cal / bfly    share of a dense (k,T) grid admitting arbitrage",
-        "  clean         arms whose selected epoch was arbitrage-free on its own draw",
-    ]
-    return "\n".join(lines)
-
-
-def plot_capacity(rows: list[dict], path: str | None = None, show: bool = False):
-    """Validation error against parameter count, log x."""
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    by_spec: dict[str, list[dict]] = {}
-    for r in rows:
-        by_spec.setdefault(r["spec"], []).append(r)
-
-    specs = list(by_spec)
-    params = np.array([by_spec[s][0]["params"] for s in specs], dtype=float)
-    val = np.array([np.mean([r["val"] for r in by_spec[s]]) for s in specs])
-    train = np.array([np.mean([r["train"] for r in by_spec[s]]) for s in specs])
-
-    fig, ax = plt.subplots(figsize=(7.5, 4.2))
-    ax.plot(params, train, "o-", lw=1.3, ms=4, label="train")
-    ax.plot(params, val, "o-", lw=1.6, ms=5, label="validation")
-    for x, y, s in zip(params, val, specs):
-        ax.annotate(s, (x, y), textcoords="offset points", xytext=(0, 7),
-                    ha="center", fontsize=8)
-    ax.set_xscale("log")
-    ax.set_xlabel("trainable parameters in the correction network")
-    ax.set_ylabel("IV RMSE (bp)")
-    ax.set_title("Capacity vs error — same chain, same budget, same split")
-    ax.grid(alpha=0.25)
-    ax.legend(frameon=False)
-    fig.tight_layout()
-    return _finish_local(fig, path, show)
-
-
-def _finish_local(fig, path, show):
-    if path:
-        fig.savefig(path, dpi=150)
-    if show:
-        import matplotlib.pyplot as plt
-        plt.show()
-    else:
-        import matplotlib.pyplot as plt
-        plt.close(fig)
-    return path if path else fig
 
 
 # ── mode 3: compare ──────────────────────────────────────────────────────────
@@ -639,7 +565,11 @@ def run_compare(cfg: RunConfig) -> int:
     if interactive():
         raw = ask(f"\n  overlay training curves for up to 6 runs? [y/N]: ", "n")
         if raw.lower().startswith("y"):
-            _plot_overlay(records[:6], cfg, show)
+            out = (cfg.output_dir / "model_comparison_curves.png"
+                   if cfg.make_plots else None)
+            plot_run_overlay(records[:6], path=str(out) if out else None, show=show)
+            if out:
+                say(f"  overlay  {out}")
 
     say()
     say(f"  to price off a specific run rather than the most recent one, copy its")
@@ -647,31 +577,6 @@ def run_compare(cfg: RunConfig) -> int:
        f"under the")
     say(f"  <ticker>_surface.pt / <ticker>_chain.npz names mode [2] expects.")
     return 0
-
-
-def _plot_overlay(records, cfg, show) -> None:
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(9, 4.8))
-    for r in records:
-        h = load_history(r)
-        ax.plot(h["val_rmse_bps"], lw=1.2,
-               label=f"{r.run_id}  (best {r.val_rmse_bps:.1f}bp)")
-    ax.set_xlabel("epoch")
-    ax.set_ylabel("validation IV RMSE (bp)")
-    ax.set_title("Validation curves across archived runs")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.25)
-    fig.tight_layout()
-
-    if cfg.make_plots:
-        out = cfg.output_dir / "model_comparison_curves.png"
-        fig.savefig(out, dpi=130, bbox_inches="tight")
-        print(f"  overlay  {out}")
-    if show:
-        plt.show()
-    else:
-        plt.close(fig)
 
 
 # ── mode 2: price ────────────────────────────────────────────────────────────

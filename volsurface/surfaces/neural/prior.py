@@ -1,5 +1,5 @@
 """
-volsurface/neural/prior.py
+volsurface/surfaces/neural/prior.py
 The SSVI prior, in torch, differentiable end to end.
 
 The neural surface does not learn ``w(k, T)`` from nothing. It learns a bounded

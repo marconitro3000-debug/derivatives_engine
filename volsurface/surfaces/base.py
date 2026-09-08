@@ -1,5 +1,5 @@
 """
-volsurface/surface.py
+volsurface/surfaces/base.py
 The one interface every volatility surface in this repo implements.
 
 A surface is defined by its **total implied variance**

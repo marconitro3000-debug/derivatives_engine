@@ -1,5 +1,5 @@
 """
-volsurface/svi.py
+volsurface/surfaces/svi.py
 The parametric surfaces the neural model has to beat: raw SVI and SSVI.
 
 **Raw SVI** (Gatheral 2004) fits one smile at a time:

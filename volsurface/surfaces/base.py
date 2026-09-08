@@ -13,7 +13,7 @@ at ``T -> 0`` and grow with maturity. Models are therefore compared, penalised
 and plotted in ``w`` space, and implied vol is a derived quantity.
 
 Implementing `total_variance` is enough to get IV, prices, and the full
-arbitrage diagnostic suite in `volsurface.diagnostics` for free.
+arbitrage diagnostic suite in `volsurface.evaluation.diagnostics` for free.
 """
 
 from __future__ import annotations

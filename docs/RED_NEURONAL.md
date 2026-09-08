@@ -8,19 +8,22 @@ evidencia las respalda.
 
 ## 1. Dónde está
 
-Todo el código de la red vive en un único paquete, `volsurface/neural/`, con 948
-líneas repartidas en cinco archivos (más un `__init__.py` de 35):
+Todo el código de la red vive en un único paquete,
+`volsurface/surfaces/neural/`, con 948 líneas repartidas en cinco archivos
+(más un `__init__.py` de 35). Está bajo `surfaces/` porque es una
+implementación más de la misma interfaz `VolSurface` que los baselines
+paramétricos — que es lo que hace que se puntúe con el mismo código.
 
 | Archivo | Líneas | Qué contiene |
 |---|---|---|
-| `volsurface/neural/model.py` | 270 | **La red.** `NeuralVolSurface`, el MLP y la envoltura de la superficie |
-| `volsurface/neural/prior.py` | 115 | El *prior* SSVI reimplementado en torch (`TorchSSVIPrior`) y la ablación `FlatPrior` |
-| `volsurface/neural/arbitrage.py` | 152 | Las penalizaciones de no-arbitraje (calendar y mariposa) y los puntos de colocación |
-| `volsurface/neural/dataset.py` | 112 | Cadena -> tensores, y el split train/validación estratificado |
-| `volsurface/neural/train.py` | 299 | El bucle de entrenamiento: objetivo, warm-up, early stopping |
+| `volsurface/surfaces/neural/model.py` | 270 | **La red.** `NeuralVolSurface`, el MLP y la envoltura de la superficie |
+| `volsurface/surfaces/neural/prior.py` | 115 | El *prior* SSVI reimplementado en torch (`TorchSSVIPrior`) y la ablación `FlatPrior` |
+| `volsurface/surfaces/neural/arbitrage.py` | 152 | Las penalizaciones de no-arbitraje (calendar y mariposa) y los puntos de colocación |
+| `volsurface/surfaces/neural/dataset.py` | 112 | Cadena -> tensores, y el split train/validación estratificado |
+| `volsurface/surfaces/neural/train.py` | 299 | El bucle de entrenamiento: objetivo, warm-up, early stopping |
 
 La definición literal de la red son unas 10 líneas de
-**`volsurface/neural/model.py`**, dentro de `__init__`:
+**`volsurface/surfaces/neural/model.py`**, dentro de `__init__`:
 
 ```python
 layers = []
@@ -120,7 +123,7 @@ gastar capas en construirlas.
 ## 3. La función de pérdida
 
 Esto es lo que hace que el proyecto sea algo más que "meterle un MLP a unos
-datos". Está en `volsurface/neural/train.py`:
+datos". Está en `volsurface/surfaces/neural/train.py`:
 
 ```
 L  =  suma_i  weight_i * (sigma_modelo(k_i,T_i) - sigma_mercado_i)^2   <- ajuste
@@ -137,7 +140,7 @@ con `lambda_cal = 10.0`, `lambda_bfly = 1.0`.
   vencimiento: minimizarla pondera la sonrisa de un año diez veces más que la
   de un mes, silenciosamente. Los errores en vol son lo que cotiza un trader.
 - Las cotizaciones van **ponderadas por vega/spread**
-  (`volsurface/chain.py`, ~línea 465). Un error de vol en una opción de ala con
+  (`volsurface/data/clean.py`). Un error de vol en una opción de ala con
   vega 0.05 vale mucho menos que el mismo error en el at-the-money.
 
 **Términos de penalización.** Son las dos condiciones estáticas de no-arbitraje
@@ -214,27 +217,32 @@ está **antes**:
 
 ```
 Yahoo Finance
-   |  volsurface/chain.py
-   +- filtro de liquidez (dos lados, OI >= 10, spread <= 25% del mid)
-   +- forward y factor de descuento implícitos por paridad put-call
-   |     C(K) - P(K) = DF*(F - K)  -> mínimos cuadrados sobre strikes emparejados
-   +- selección sólo OTM (calls sobre el forward, puts debajo)
-   +- inversión de IV propia (volsurface/impliedvol.py)
-   +- de-americanización en árbol binomial (volsurface/american.py)
+   |  data/fetch.py          descarga, y elige vencimientos repartidos en sqrt(T)
+   v
+   |  data/clean.py          filtro de liquidez (dos lados, OI >= 10,
+   |                         spread <= 25% del mid), selección sólo OTM
+   |                         (calls sobre el forward, puts debajo),
+   |                         y el peso de ajuste vega/spread
+   +- data/forward.py        forward y descuento por paridad put-call
+   |                         C(K) - P(K) = DF*(F - K), como punto fijo
+   |                         contra los precios de-americanizados
+   +- pricing/impliedvol.py  inversión de IV propia
+   +- pricing/american.py    de-americanización en árbol binomial
          -> en SPY quita 13.26bp de vol de media, 24.98bp más allá de un año,
             y casi todo está en los puts
    |
-   v  ChainSnapshot: 1.460 cotizaciones limpias, 8 vencimientos
+   v  data/snapshot.py -> ChainSnapshot: 1.460 cotizaciones limpias,
+                          8 vencimientos
    |
-   +- volsurface/svi.py       -> baselines: SVI por slice y SSVI conjunta
-   |                              (SSVI es además el prior de la red)
-   +- volsurface/neural/      -> la red
+   +- surfaces/svi.py        baselines: SVI por slice y SSVI conjunta
+   |                         (SSVI es además el prior de la red)
+   +- surfaces/neural/       la red
    |
-   v  volsurface/diagnostics.py  -> escaneo de arbitraje en malla densa
-      volsurface/report.py       -> el scorecard
+   v  volsurface/evaluation/diagnostics.py  -> escaneo de arbitraje en malla densa
+      volsurface/evaluation/report.py       -> el scorecard
 ```
 
-`NeuralVolSurface` hereda de `VolSurface` (`volsurface/surface.py`), la misma
+`NeuralVolSurface` hereda de `VolSurface` (`volsurface/surfaces/base.py`), la misma
 interfaz abstracta que los baselines paramétricos. Sólo hay que implementar
 `total_variance(k, T)` y salen gratis IV, precios y todo el suite de
 diagnósticos. La red **se puntúa con exactamente el mismo código** que SVI y
@@ -484,5 +492,5 @@ número uno de que a primera vista el paquete parezca inusual.
 - Gatheral, J. (2004). *A parsimonious arbitrage-free implied volatility parameterization* — SVI crudo.
 - Gatheral, J. & Jacquier, A. (2014). *Arbitrage-free SVI volatility surfaces* — SSVI y las condiciones de mariposa.
 - Roper, M. (2010). *Arbitrage free implied volatility surfaces* — las condiciones estáticas.
-- Zeliade Systems (2009). *Quasi-explicit calibration of Gatheral's SVI model* — la calibración en dos etapas de `volsurface/svi.py`.
+- Zeliade Systems (2009). *Quasi-explicit calibration of Gatheral's SVI model* — la calibración en dos etapas de `volsurface/surfaces/svi.py`.
 - Durrleman, V. (2010) — la función `g`.

@@ -63,7 +63,7 @@ class RunConfig:
     with a European formula, which charges the early-exercise premium to
     volatility -- on SPY that is ~13bp of vol on average and ~25bp beyond one
     year, against a fit measured in tens of bp. Costs a few seconds; see
-    `volsurface.american`."""
+    `volsurface.pricing.american`."""
 
     lattice_steps: int = 150
     """Steps in the binomial tree used for de-Americanisation. The premium is a
@@ -97,7 +97,7 @@ class RunConfig:
     """Every TRAIN run is archived here under its own timestamped folder --
     weights, the chain it saw, the full training history, and metrics.json.
     Never overwritten, so mode [3] (compare) has something to compare. See
-    `volsurface.registry`."""
+    `volsurface.evaluation.registry`."""
 
     make_plots: bool = True
     save_model: bool = True

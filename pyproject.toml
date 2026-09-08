@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "volsurface"
-version = "1.0.0"
+version = "1.1.0"
 description = "Arbitrage-penalised neural implied-volatility surface fitted to real option chains"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -41,7 +41,14 @@ dev = ["pytest>=8.0"]
 notebook = ["jupyter>=1.0", "nbformat>=5.9", "nbconvert>=7.0", "ipykernel>=6.0"]
 
 [tool.setuptools]
-packages = ["volsurface", "volsurface.neural"]
+packages = [
+    "volsurface",
+    "volsurface.data",
+    "volsurface.pricing",
+    "volsurface.surfaces",
+    "volsurface.surfaces.neural",
+    "volsurface.evaluation",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

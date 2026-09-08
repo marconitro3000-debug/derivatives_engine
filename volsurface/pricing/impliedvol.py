@@ -44,7 +44,7 @@ def _newton(S: float, K: float, T: float, r: float, market_price: float,
     happened to be standing on. Stopping when σ itself stops moving is the
     condition that actually means the root has been located.
 
-    This is also why `volsurface.chain` fits only out-of-the-money quotes: no
+    This is also why `volsurface.data` fits only out-of-the-money quotes: no
     stopping rule can recover a volatility the price does not encode, and for a
     deep ITM option it barely does.
     """

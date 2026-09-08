@@ -155,8 +155,8 @@ def list_runs(root: Path, ticker: str | None = None) -> list[RunRecord]:
 
 def load_run(record: RunRecord):
     """Reload the model and chain a `RunRecord` points to."""
-    from volsurface.chain import ChainSnapshot
-    from volsurface.neural.model import NeuralVolSurface
+    from volsurface.data import ChainSnapshot
+    from volsurface.surfaces.neural.model import NeuralVolSurface
 
     model = NeuralVolSurface.load(record.path("surface.pt"))
     chain = ChainSnapshot.load(record.path("chain.npz"))

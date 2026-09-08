@@ -195,7 +195,7 @@ def de_americanised_iv(spot: float, strike: float, T: float, r: float, q: float,
     -------
     ``(sigma, european_equivalent_price)``. The second value is the quote minus
     its early-exercise premium: the price a European option with the same strike
-    and expiry would trade at. `volsurface.chain` needs it because put-call
+    and expiry would trade at. `volsurface.data` needs it because put-call
     parity -- which it uses to fit the forward -- holds for European options and
     *not* for American ones, so the parity regression has to run on these prices
     rather than on the raw mids.

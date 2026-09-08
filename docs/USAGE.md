@@ -393,7 +393,7 @@ chain2 = vs.ChainSnapshot.load("spy_chain.npz")
 Build from your own data instead of Yahoo:
 
 ```python
-from volsurface.chain import build_snapshot
+from volsurface.data import build_snapshot
 # expiry_chains: {"YYYY-MM-DD": (calls_df, puts_df)}
 # each frame needs: strike, bid, ask, openInterest, volume
 chain = build_snapshot("XYZ", spot=100.0, asof=date.today(),

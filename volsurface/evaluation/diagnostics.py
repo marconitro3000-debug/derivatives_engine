@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from volsurface.surface import VolSurface
+from volsurface.surfaces.base import VolSurface
 
 
 # -- results ------------------------------------------------------------------
@@ -192,7 +192,7 @@ def fit_report(surface: VolSurface, snapshot, weighted: bool = True) -> FitRepor
     The price comparison uses the chain's **European-equivalent** mids, not the
     raw quotes. The surface is European by construction; the quotes are
     American. Scoring a European model against American prices would charge it
-    for the early-exercise premium that `volsurface.american` deliberately
+    for the early-exercise premium that `volsurface.pricing.american` deliberately
     removed, which on a long-dated put wing is far larger than the fit error
     being measured.
     """

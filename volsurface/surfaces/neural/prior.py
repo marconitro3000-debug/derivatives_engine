@@ -13,7 +13,7 @@ arbitrage penalties possible: ``dw/dT``, ``dw/dk`` and ``d2w/dk2`` of the *full*
 model, prior included, come out of `torch.autograd` exactly, with no finite
 differences and no error floor to tune tolerances against.
 
-`TorchSSVIPrior.from_surface` reproduces `volsurface.svi.SSVISurface` exactly --
+`TorchSSVIPrior.from_surface` reproduces `volsurface.surfaces.svi.SSVISurface` exactly --
 both use the same monotone piecewise-linear ``theta(T)``, so the prior the
 network corrects is the surface the report benchmarks against.
 """
@@ -29,7 +29,7 @@ class TorchSSVIPrior(nn.Module):
     """SSVI total variance as a frozen torch module.
 
     Parameters are registered as buffers, not parameters: the prior is
-    calibrated once by `volsurface.svi.calibrate_ssvi` and held fixed while the
+    calibrated once by `volsurface.surfaces.svi.calibrate_ssvi` and held fixed while the
     network trains. Letting both move at once makes the correction
     unidentifiable -- the network can always absorb a change in ``rho`` and you
     lose the interpretation of the correction as a residual.
@@ -55,7 +55,7 @@ class TorchSSVIPrior(nn.Module):
 
     @classmethod
     def from_surface(cls, surface) -> "TorchSSVIPrior":
-        """Build the torch prior from a calibrated `volsurface.svi.SSVISurface`."""
+        """Build the torch prior from a calibrated `volsurface.surfaces.svi.SSVISurface`."""
         p = surface.params
         return cls(p.rho, p.eta, p.gamma, surface.T_nodes, surface.theta_nodes)
 

@@ -92,7 +92,7 @@ def test_the_price_table_is_the_library_pricer(clean_chain):
     Every row is a `price_option` call now, so the two cannot disagree."""
     from main import quote_table
     from volsurface import price_option
-    from volsurface.svi import SSVISurface
+    from volsurface.surfaces.svi import SSVISurface
 
     surface = SSVISurface.fit(clean_chain)
     T = float(clean_chain.maturities[-1])
@@ -115,7 +115,7 @@ def test_the_price_table_refuses_what_the_pricer_refuses(clean_chain):
     """An impossible maturity has to reach the caller as the pricer's error, so
     the interactive loop can print it and stay alive rather than crashing."""
     from main import quote_table
-    from volsurface.svi import SSVISurface
+    from volsurface.surfaces.svi import SSVISurface
 
     surface = SSVISurface.fit(clean_chain)
     with pytest.raises(ValueError, match="plausible maturity"):

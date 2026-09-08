@@ -1,5 +1,5 @@
 """
-volsurface/american.py
+volsurface/pricing/american.py
 Cox-Ross-Rubinstein binomial tree, and the early-exercise bias it measures.
 
 Why a lattice belongs in a project about *European* implied vol: listed

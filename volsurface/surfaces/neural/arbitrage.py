@@ -1,5 +1,5 @@
 """
-volsurface/neural/arbitrage.py
+volsurface/surfaces/neural/arbitrage.py
 Soft no-arbitrage constraints, differentiated exactly.
 
 The two static conditions from `volsurface.evaluation.diagnostics` are turned into penalties the

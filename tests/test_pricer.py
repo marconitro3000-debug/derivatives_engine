@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from volsurface.pricing.blackscholes import price as bs_price
-from volsurface.pricing.option import OptionQuote, price_option, resolve_maturity
+from volsurface.quote import OptionQuote, price_option, resolve_maturity
 from volsurface.surfaces.svi import SSVISurface
 
 

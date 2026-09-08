@@ -1,5 +1,5 @@
 """
-volsurface/neural/dataset.py
+volsurface/surfaces/neural/dataset.py
 Chain -> tensors, and the train/validation split that actually tests something.
 
 The split is **stratified within each expiry**, not random over the whole chain

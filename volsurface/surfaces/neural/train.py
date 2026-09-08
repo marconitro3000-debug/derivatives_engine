@@ -1,5 +1,5 @@
 """
-volsurface/neural/train.py
+volsurface/surfaces/neural/train.py
 Fitting the neural surface.
 
 Objective

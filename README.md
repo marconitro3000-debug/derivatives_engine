@@ -286,7 +286,7 @@ almost everywhere.
 
 ### 5. Everything is scored by the same code — [`volsurface/evaluation/diagnostics.py`](volsurface/evaluation/diagnostics.py)
 
-Neural, SVI and SSVI all implement `volsurface.surface.VolSurface`, so they pass
+Neural, SVI and SSVI all implement `volsurface.surfaces.base.VolSurface`, so they pass
 through identical fit reports and arbitrage scans. Reporting fit *and* arbitrage
 together is the point: a comparison showing only RMSE ranks the wrong model
 first.
@@ -308,20 +308,11 @@ config.py                      every knob, one file
 notebook.ipynb                 the same study as a paper, with outputs
 
 volsurface/
-    data/                      WHERE THE QUOTES COME FROM
-        fetch.py               the live Yahoo Finance chain
-        clean.py               raw frames -> clean chain; every filter lives here
-        forward.py             forward + discount from put-call parity
-        snapshot.py            ChainSnapshot — the only structure that leaves here
-        synthetic.py           the offline generator: a chain from a known SSVI surface
-        conventions.py         day counts
-
-    pricing/                   WHAT A PRICE IS
+    pricing/                   WHAT A PRICE IS  (primitives, no internal deps)
         blackscholes.py        closed-form price and Greeks
         impliedvol.py          inversion, with an identifiability guard
         american.py            binomial lattice; de-Americanisation
         montecarlo.py          independent numerical check on the analytic formula
-        option.py              strike + expiry date + side -> price, Greeks, caveats
 
     surfaces/                  THE MODELS
         base.py                the VolSurface interface — everything is total variance
@@ -333,13 +324,41 @@ volsurface/
             dataset.py         tensors and the stratified split
             train.py           vega-weighted objective, warm-up, feasible-epoch selection
 
+    data/                      WHERE THE QUOTES COME FROM
+        fetch.py               the live Yahoo Finance chain
+        clean.py               raw frames -> clean chain; every filter lives here
+        forward.py             forward + discount from put-call parity
+        snapshot.py            ChainSnapshot — the only structure that leaves here
+        synthetic.py           ** the offline data generator ** — a chain from a
+                               known arbitrage-free SSVI surface
+        conventions.py         day counts
+
     evaluation/                HOW A SURFACE IS JUDGED
         diagnostics.py         fit reports and the dense-grid arbitrage scan
-        report.py              scorecards, training curves, smiles, arbitrage maps
+        report.py              scorecards, curves, smiles, arbitrage maps, the
+                               capacity table
         registry.py            archive of trained runs — which checkpoint to use
 
-tests/                         128 tests, no network required
+    quote.py                   USING A FITTED SURFACE
+                               strike + expiry date + side -> price, Greeks, caveats
+
+tests/                         161 tests, no network required
 ```
+
+The packages are listed in dependency order, and that order is enforced:
+
+```
+pricing  ->  surfaces  ->  data  ->  evaluation  ->  quote
+```
+
+`pricing` is primitives and imports nothing else here. `data` needs both
+(cleaning inverts implied vols and de-Americanises; the generator samples a
+known SSVI surface). `evaluation` needs a chain and a surface to judge.
+`quote` consumes all four, which is why it sits above them rather than inside
+`pricing/` — filing it there put a cycle in the graph.
+[`tests/test_layout.py`](tests/test_layout.py) reads the import graph out of the
+source and fails if any of that stops being true, because a structure nobody
+checks decays back into a flat namespace one convenient import at a time.
 
 Every public name is re-exported from `volsurface` itself, so the layout is for
 reading the code, not a tax on using it: `from volsurface import price_option`

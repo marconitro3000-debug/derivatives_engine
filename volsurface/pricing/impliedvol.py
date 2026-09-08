@@ -1,5 +1,5 @@
 """
-volsurface/impliedvol.py
+volsurface/pricing/impliedvol.py
 Implied volatility extraction via Newton-Raphson (primary) with Brent fallback.
 """
 

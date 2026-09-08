@@ -1,5 +1,5 @@
 """
-volsurface/conventions.py
+volsurface/data/conventions.py
 Day-count conventions for converting calendar dates to year fractions.
 
 One named convention instead of an ad-hoc `(end - start).days / 365.0` at

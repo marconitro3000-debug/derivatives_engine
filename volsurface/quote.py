@@ -1,5 +1,5 @@
 """
-volsurface/pricer.py
+volsurface/quote.py
 Price one named option off a fitted surface.
 
 Everything else in this library works in ``(k, T)`` -- log-moneyness against the
@@ -8,7 +8,11 @@ a surface and the wrong one for *using* it: an option is named by a strike, a
 calendar expiry date and a side, and nobody holds "SPY, k = +0.013, T = 0.282y".
 
 This module is the translation layer, and it is deliberately the only place the
-translation happens:
+translation happens. It lives at the top of the package rather than inside
+`pricing/` because it is not a pricing primitive -- it consumes all four
+subpackages (a chain from `data`, an interface from `surfaces`, the Black-76
+formula from `pricing`, the no-arbitrage conditions from `evaluation`), and
+filing it under `pricing/` put a cycle in the dependency graph:
 
     quote = price_option(surface, chain, strike=780, expiry="2026-12-19", kind="put")
     quote.price          # 21.734
@@ -55,11 +59,11 @@ from datetime import date, datetime
 
 import numpy as np
 
-from ..data.conventions import year_fraction
-from ..data.snapshot import ChainSnapshot
-from ..evaluation.diagnostics import butterfly_g
-from ..surfaces.base import VolSurface
-from .blackscholes import greeks, price as bs_price
+from .data.conventions import year_fraction
+from .data.snapshot import ChainSnapshot
+from .evaluation.diagnostics import butterfly_g
+from .pricing.blackscholes import greeks, price as bs_price
+from .surfaces.base import VolSurface
 
 __all__ = ["OptionQuote", "price_option", "resolve_maturity"]
 
